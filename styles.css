@@ -221,7 +221,16 @@ th { color: var(--muted); font-weight: 500; }
 .boot-loader.is-done {
   opacity: 0;
   visibility: hidden;
-  pointer-events: none;
+  pointer-events: none !important;
+  display: none;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+.modal-backdrop:not([hidden]) {
+  display: grid;
 }
 .boot-card {
   text-align: center;

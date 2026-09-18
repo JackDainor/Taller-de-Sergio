@@ -1,918 +1,1029 @@
-const STORAGE_KEY = "atelier-office-v1";
+/* Atelier Office — app principal */
+(function () {
+  "use strict";
 
-const state = {
-  workspaceName: "Atelier Office",
-  theme: "dark",
-  currentMonth: monthKey(new Date()),
-  currentView: "dashboard",
-  workers: [],
-  garments: [],
-  months: {}
-};
+  const STORAGE_KEY = "atelier-office-v1";
 
-function uid(prefix = "id") {
-  return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
-}
-
-function monthKey(date) {
-  const d = date instanceof Date ? date : new Date(date);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-}
-
-function monthLabel(key) {
-  const [y, m] = key.split("-");
-  const names = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
-  return `${names[Number(m) - 1]} ${y}`;
-}
-
-function money(n) {
-  return `R$ ${Number(n || 0).toFixed(2).replace(".", ",")}`;
-}
-
-function ensureMonth(key) {
-  if (!state.months[key]) {
-    state.months[key] = { status: "abierto", groups: [], cuts: [], vales: [] };
+  function monthKey(date) {
+    const d = date instanceof Date ? date : new Date(date);
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
   }
-  if (!state.months[key].status) state.months[key].status = "abierto";
-  if (!state.months[key].groups) state.months[key].groups = [];
-  if (!state.months[key].cuts) state.months[key].cuts = [];
-  if (!state.months[key].vales) state.months[key].vales = [];
-  return state.months[key];
-}
 
-function currentData() {
-  return ensureMonth(state.currentMonth);
-}
-
-function isMonthClosed(key = state.currentMonth) {
-  return ensureMonth(key).status === "cerrado";
-}
-
-function save() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-}
-
-function load() {
-  const raw = localStorage.getItem(STORAGE_KEY);
-  if (!raw) {
-    ensureMonth(state.currentMonth);
-    return;
+  function monthLabel(key) {
+    const parts = String(key || "").split("-");
+    const y = parts[0];
+    const m = Number(parts[1] || 1);
+    const names = [
+      "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+      "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
+    ];
+    return (names[m - 1] || key) + " " + y;
   }
-  try {
-    const parsed = JSON.parse(raw);
-    Object.assign(state, parsed);
-    ensureMonth(state.currentMonth);
-    Object.keys(state.months || {}).forEach((k) => ensureMonth(k));
-  } catch {
-    ensureMonth(state.currentMonth);
+
+  function uid(prefix) {
+    return (prefix || "id") + "_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8);
   }
-}
 
-function toast(msg) {
-  const el = document.getElementById("toast");
-  el.textContent = msg;
-  el.hidden = false;
-  setTimeout(() => { el.hidden = true; }, 2800);
-}
+  function money(n) {
+    return "R$ " + Number(n || 0).toFixed(2).replace(".", ",");
+  }
 
-function fileToDataUrl(file) {
-  return new Promise((resolve) => {
-    if (!file) return resolve("");
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.readAsDataURL(file);
-  });
-}
+  function labelType(type) {
+    return ({ plano: "Tejido plano", malla: "Malla", otro: "Otro" })[type] || type || "Otro";
+  }
 
-function workerById(id) {
-  return state.workers.find((w) => w.id === id);
-}
-
-function garmentById(id) {
-  return state.garments.find((g) => g.id === id);
-}
-
-function groupById(id) {
-  return currentData().groups.find((g) => g.id === id);
-}
-
-function splitForGroup(group) {
-  const rectas = group.members.filter((m) => m.machine === "recta");
-  const overs = group.members.filter((m) => m.machine === "overlock");
-  const rectaPool = Number(group.rectaPay || 0);
-  const overPool = Number(group.overlockPay || 0);
-  const map = {};
-  rectas.forEach((m) => {
-    map[m.workerId] = rectas.length ? rectaPool / rectas.length : 0;
-  });
-  overs.forEach((m) => {
-    map[m.workerId] = overs.length ? overPool / overs.length : 0;
-  });
-  return map;
-}
-
-function monthTotals(key = state.currentMonth) {
-  const data = ensureMonth(key);
-  let produced = 0;
-  let earned = 0;
-  let paid = 0;
-  let pending = 0;
-  const byWorker = {};
-  state.workers.forEach((w) => {
-    byWorker[w.id] = { earned: 0, paid: 0, pending: 0, vales: 0 };
-  });
-
-  data.cuts.forEach((cut) => {
-    const group = data.groups.find((g) => g.id === cut.groupId);
-    if (!group) return;
-    const qty = Number(cut.qty || 0);
-    produced += qty;
-    const per = splitForGroup(group);
-    Object.entries(per).forEach(([wid, unit]) => {
-      const amount = unit * qty;
-      earned += amount;
-      if (!byWorker[wid]) byWorker[wid] = { earned: 0, paid: 0, pending: 0, vales: 0 };
-      byWorker[wid].earned += amount;
-      if (cut.status === "pagado") {
-        paid += amount;
-        byWorker[wid].paid += amount;
-      } else {
-        pending += amount;
-        byWorker[wid].pending += amount;
-      }
-    });
-  });
-
-  data.vales.forEach((v) => {
-    if (!byWorker[v.workerId]) byWorker[v.workerId] = { earned: 0, paid: 0, pending: 0, vales: 0 };
-    byWorker[v.workerId].vales += Number(v.amount || 0);
-  });
-
-  return {
-    produced,
-    earned,
-    paid,
-    pending,
-    vales: data.vales.reduce((a, v) => a + Number(v.amount || 0), 0),
-    byWorker
+  const state = {
+    workspaceName: "Atelier Office",
+    theme: "dark",
+    currentMonth: monthKey(new Date()),
+    currentView: "dashboard",
+    workers: [],
+    garments: [],
+    months: {}
   };
-}
 
-function openModal(title, html) {
-  document.getElementById("modalTitle").textContent = title;
-  document.getElementById("modalBody").innerHTML = html;
-  document.getElementById("modal").hidden = false;
-}
+  function ensureMonth(key) {
+    if (!key) key = monthKey(new Date());
+    if (!state.months[key]) {
+      state.months[key] = { status: "abierto", groups: [], cuts: [], vales: [] };
+    }
+    const m = state.months[key];
+    if (!m.status) m.status = "abierto";
+    if (!Array.isArray(m.groups)) m.groups = [];
+    if (!Array.isArray(m.cuts)) m.cuts = [];
+    if (!Array.isArray(m.vales)) m.vales = [];
+    return m;
+  }
 
-function closeModal() {
-  document.getElementById("modal").hidden = true;
-}
+  function currentData() {
+    return ensureMonth(state.currentMonth);
+  }
 
-function setTheme(theme) {
-  state.theme = theme;
-  document.documentElement.setAttribute("data-theme", theme);
-  document.getElementById("themeToggle").textContent =
-    theme === "dark" ? "Cambiar a tema claro" : "Cambiar a tema oscuro";
-  const meta = document.querySelector('meta[name="theme-color"]');
-  if (meta) meta.setAttribute("content", theme === "dark" ? "#12100e" : "#f4efe6");
-  save();
-}
+  function isMonthClosed(key) {
+    return ensureMonth(key || state.currentMonth).status === "cerrado";
+  }
 
-function updateMonthChrome() {
-  const closed = isMonthClosed();
-  const label = document.getElementById("monthStatusLabel");
-  const btn = document.getElementById("toggleMonthStatusBtn");
-  const banner = document.getElementById("monthLockedBanner");
-  const app = document.getElementById("appRoot");
+  function safeStorageGet() {
+    try {
+      return localStorage.getItem(STORAGE_KEY);
+    } catch (e) {
+      return null;
+    }
+  }
 
-  label.textContent = closed ? "Estado: mes terminado" : "Estado: mes abierto";
-  label.className = `month-status ${closed ? "closed" : "open"}`;
-  btn.textContent = closed ? "Reabrir mes" : "Marcar mes terminado";
-  banner.hidden = !closed;
-  app.classList.toggle("is-month-closed", closed);
-}
+  function save() {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    } catch (e) {
+      toast("No se pudo guardar (almacenamiento lleno o bloqueado)");
+    }
+  }
 
-function renderMonthSelect() {
-  const sel = document.getElementById("monthSelect");
-  const keys = Object.keys(state.months).sort();
-  if (!keys.includes(state.currentMonth)) keys.push(state.currentMonth);
-  sel.innerHTML = keys
-    .map((k) => {
-      const tag = ensureMonth(k).status === "cerrado" ? " · cerrado" : "";
-      return `<option value="${k}" ${k === state.currentMonth ? "selected" : ""}>${monthLabel(k)}${tag}</option>`;
-    })
-    .join("");
-}
-
-function renderChrome() {
-  document.getElementById("workspaceTitle").textContent = state.workspaceName;
-  document.title = `${state.workspaceName} — Jefe de oficina`;
-  renderMonthSelect();
-  updateMonthChrome();
-  const titles = {
-    dashboard: ["Resumen del mes", "Panel"],
-    workers: ["Plantel", "Funcionarios"],
-    garments: ["Catálogo de producción", "Prendas"],
-    groups: ["Equipos de costura", "Grupos"],
-    cuts: ["Producción del mes", "Cortes terminados"],
-    vales: ["Adelantos individuales", "Vales"],
-    payroll: ["Liquidación", "Pagos"],
-    settings: ["Respaldos y preferencias", "Ajustes y datos"]
-  };
-  const [crumb, title] = titles[state.currentView];
-  document.getElementById("crumb").textContent = `${crumb} · ${monthLabel(state.currentMonth)}`;
-  document.getElementById("pageTitle").textContent = title;
-  document.querySelectorAll(".nav-btn").forEach((b) =>
-    b.classList.toggle("active", b.dataset.view === state.currentView)
-  );
-  document.querySelectorAll(".view").forEach((v) => v.classList.remove("active"));
-  document.getElementById(`view-${state.currentView}`).classList.add("active");
-}
-
-function renderDashboard() {
-  const t = monthTotals();
-  const closed = isMonthClosed();
-  const rows =
-    state.workers
-      .map((w) => {
-        const x = t.byWorker[w.id] || { earned: 0, paid: 0, pending: 0, vales: 0 };
-        const net = x.pending - x.vales;
-        return `<tr>
-      <td>${w.name}</td>
-      <td>${money(x.earned)}</td>
-      <td>${money(x.paid)}</td>
-      <td>${money(x.pending)}</td>
-      <td>${money(x.vales)}</td>
-      <td><strong>${money(net)}</strong></td>
-    </tr>`;
-      })
-      .join("") ||
-    `<tr><td colspan="6" class="muted">Todavía no hay funcionarios en este taller.</td></tr>`;
-
-  document.getElementById("view-dashboard").innerHTML = `
-    <div class="grid stats">
-      <article class="card"><h3>Prendas del mes</h3><p class="stat">${t.produced}</p></article>
-      <article class="card"><h3>Producido</h3><p class="stat">${money(t.earned)}</p></article>
-      <article class="card"><h3>Pendiente</h3><p class="stat">${money(t.pending)}</p></article>
-      <article class="card"><h3>Vales</h3><p class="stat">${money(t.vales)}</p></article>
-    </div>
-    <div class="card" style="margin-top:14px">
-      <h3>Por funcionario en ${monthLabel(state.currentMonth)} ${closed ? "· terminado" : ""}</h3>
-      <p class="muted">El neto pendiente descuenta vales individuales. Los meses no se mezclan. El cierre del mes es manual.</p>
-      <table>
-        <thead><tr><th>Funcionario</th><th>Devengado</th><th>Pagado</th><th>Pendiente</th><th>Vales</th><th>Neto a pagar</th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table>
-    </div>`;
-}
-
-function renderWorkers() {
-  const cards =
-    state.workers
-      .map(
-        (w) => `
-    <article class="card person">
-      ${w.photo ? `<img class="person-photo" src="${w.photo}" alt="${w.name}">` : `<div class="person-photo"></div>`}
-      <h4>${w.name}</h4>
-      <p class="muted">${w.notes || "Sin observaciones"}</p>
-      <div class="toolbar">
-        <button class="btn small secondary" data-edit-worker="${w.id}">Editar</button>
-        <button class="btn small" data-del-worker="${w.id}">Quitar</button>
-      </div>
-    </article>`
-      )
-      .join("") || `<div class="card muted">Agregá el primer funcionario del taller.</div>`;
-
-  document.getElementById("view-workers").innerHTML = `
-    <div class="toolbar">
-      <p class="muted">Los funcionarios se mantienen entre meses. La producción se administra por mes.</p>
-      <button class="btn" id="addWorker">Agregar funcionario</button>
-    </div>
-    <div class="people">${cards}</div>`;
-}
-
-function workerForm(worker = {}) {
-  return `
-    <label>Nombre<input name="name" value="${worker.name || ""}" required></label>
-    <label>Notas<textarea name="notes">${worker.notes || ""}</textarea></label>
-    <label>Foto de muestra<input type="file" name="photo" accept="image/*"></label>
-    ${worker.photo ? `<img class="person-photo" src="${worker.photo}" alt="">` : ""}
-    <button class="btn" id="saveWorker">Guardar</button>`;
-}
-
-function renderGarments() {
-  const cards =
-    state.garments
-      .map(
-        (g) => `
-    <article class="card gcard">
-      ${g.photo ? `<img class="garment-photo" src="${g.photo}" alt="${g.name}">` : `<div class="garment-photo"></div>`}
-      <h4>${g.name}</h4>
-      <span class="badge">${labelType(g.type)}</span>
-      <p class="muted">${g.notes || ""}</p>
-      <div class="toolbar">
-        <button class="btn small secondary" data-edit-garment="${g.id}">Editar</button>
-        <button class="btn small" data-del-garment="${g.id}">Quitar</button>
-      </div>
-    </article>`
-      )
-      .join("") || `<div class="card muted">Cargá las prendas que se confeccionan.</div>`;
-
-  document.getElementById("view-garments").innerHTML = `
-    <div class="toolbar">
-      <p class="muted">Tejido plano, malla u otro. La foto queda guardada en el JSON.</p>
-      <button class="btn" id="addGarment">Agregar prenda</button>
-    </div>
-    <div class="cards">${cards}</div>`;
-}
-
-function labelType(type) {
-  return { plano: "Tejido plano", malla: "Malla", otro: "Otro" }[type] || type || "Otro";
-}
-
-function garmentForm(g = {}) {
-  return `
-    <label>Nombre de la prenda<input name="name" value="${g.name || ""}" required></label>
-    <label>Tipo
-      <select name="type">
-        <option value="plano" ${g.type === "plano" ? "selected" : ""}>Tejido plano</option>
-        <option value="malla" ${g.type === "malla" ? "selected" : ""}>Malla</option>
-        <option value="otro" ${g.type === "otro" ? "selected" : ""}>Otro</option>
-      </select>
-    </label>
-    <label>Notas<textarea name="notes">${g.notes || ""}</textarea></label>
-    <label>Foto de muestra<input type="file" name="photo" accept="image/*"></label>
-    <button class="btn" id="saveGarment">Guardar</button>`;
-}
-
-function renderGroups() {
-  const data = currentData();
-  const closed = isMonthClosed();
-  const cards =
-    data.groups
-      .map((g) => {
-        const garment = garmentById(g.garmentId);
-        const members = g.members
-          .map((m) => `${workerById(m.workerId)?.name || "—"} (${m.machine})`)
-          .join(" · ");
-        return `<article class="card">
-      <h4>${g.name}</h4>
-      <p>${garment ? garment.name : "Sin prenda"} · ${money(g.pricePerPiece)} / prenda</p>
-      <p class="muted">Recta ${money(g.rectaPay)} · Overlock ${money(g.overlockPay)}</p>
-      <p>${members || "Sin integrantes"}</p>
-      <div class="toolbar">
-        <button class="btn small secondary" data-edit-group="${g.id}" ${closed ? "disabled" : ""}>Editar</button>
-        <button class="btn small" data-del-group="${g.id}" ${closed ? "disabled" : ""}>Quitar</button>
-      </div>
-    </article>`;
-      })
-      .join("") ||
-    `<div class="card muted">Creá un grupo de 1, 2 o 3 personas y definí el pago por máquina.</div>`;
-
-  document.getElementById("view-groups").innerHTML = `
-    <div class="toolbar">
-      <p class="muted">Los valores de recta y overlock se pueden cambiar por grupo${closed ? ". Mes cerrado: solo lectura." : "."}</p>
-      <button class="btn" id="addGroup" data-requires-open ${closed ? "disabled" : ""}>Crear grupo</button>
-    </div>
-    <div class="cards">${cards}</div>`;
-}
-
-function groupForm(group = {}) {
-  const members = group.members || [{ workerId: "", machine: "recta" }];
-  const workerOpts = (selected) =>
-    state.workers
-      .map((w) => `<option value="${w.id}" ${w.id === selected ? "selected" : ""}>${w.name}</option>`)
-      .join("");
-  const garmentOpts = state.garments
-    .map((g) => `<option value="${g.id}" ${g.id === group.garmentId ? "selected" : ""}>${g.name}</option>`)
-    .join("");
-  const rows = members
-    .map(
-      (m, i) => `
-    <div class="form-row member-row">
-      <label>Funcionario ${i + 1}
-        <select name="worker_${i}"><option value="">—</option>${workerOpts(m.workerId)}</select>
-      </label>
-      <label>Máquina
-        <select name="machine_${i}">
-          <option value="recta" ${m.machine === "recta" ? "selected" : ""}>Recta</option>
-          <option value="overlock" ${m.machine === "overlock" ? "selected" : ""}>Overlock</option>
-        </select>
-      </label>
-    </div>`
-    )
-    .join("");
-
-  return `
-    <label>Nombre del grupo<input name="name" value="${group.name || ""}" required></label>
-    <label>Prenda<select name="garmentId"><option value="">—</option>${garmentOpts}</select></label>
-    <div class="form-row">
-      <label>Precio por prenda (corte)<input type="number" step="0.01" name="pricePerPiece" value="${group.pricePerPiece ?? 1.4}"></label>
-      <label>Pago recta / prenda<input type="number" step="0.01" name="rectaPay" value="${group.rectaPay ?? 1}"></label>
-    </div>
-    <label>Pago overlock / prenda<input type="number" step="0.01" name="overlockPay" value="${group.overlockPay ?? 0.4}"></label>
-    <p class="muted">Ejemplo: corte R$ 1,40 · recta R$ 1,00 (si hay dos rectas, R$ 0,50 c/u) · overlock R$ 0,40.</p>
-    <div id="memberFields">${rows}</div>
-    <button class="btn secondary" type="button" id="addMemberRow">Agregar integrante</button>
-    <button class="btn" id="saveGroup">Guardar grupo</button>`;
-}
-
-function renderCuts() {
-  const data = currentData();
-  const closed = isMonthClosed();
-  const rows =
-    data.cuts
-      .map((c) => {
-        const g = data.groups.find((x) => x.id === c.groupId);
-        return `<tr>
-      <td>${c.date || ""}</td>
-      <td>${g ? g.name : "—"}</td>
-      <td>${c.qty}</td>
-      <td><span class="badge ${c.status === "pagado" ? "ok" : "warn"}">${c.status}</span></td>
-      <td>${c.notes || ""}</td>
-      <td>
-        <button class="btn small secondary" data-toggle-cut="${c.id}" ${closed ? "disabled" : ""}>${
-          c.status === "pagado" ? "Marcar pendiente" : "Marcar pagado"
-        }</button>
-        <button class="btn small" data-del-cut="${c.id}" ${closed ? "disabled" : ""}>Borrar</button>
-      </td>
-    </tr>`;
-      })
-      .join("") || `<tr><td colspan="6" class="muted">No hay cortes en este mes.</td></tr>`;
-
-  document.getElementById("view-cuts").innerHTML = `
-    <div class="toolbar">
-      <p class="muted">Cada corte pertenece al mes activo. El cierre del mes es manual${closed ? " y ahora está cerrado." : "."}</p>
-      <button class="btn" id="addCut" data-requires-open ${closed ? "disabled" : ""}>Registrar corte terminado</button>
-    </div>
-    <div class="card">
-      <table>
-        <thead><tr><th>Fecha</th><th>Grupo</th><th>Prendas</th><th>Estado</th><th>Notas</th><th></th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table>
-    </div>`;
-}
-
-function cutForm() {
-  const opts = currentData()
-    .groups.map((g) => `<option value="${g.id}">${g.name}</option>`)
-    .join("");
-  return `
-    <label>Grupo<select name="groupId">${opts}</select></label>
-    <div class="form-row">
-      <label>Fecha<input type="date" name="date" value="${new Date().toISOString().slice(0, 10)}"></label>
-      <label>Prendas totales<input type="number" name="qty" min="1" value="1"></label>
-    </div>
-    <label>Estado
-      <select name="status">
-        <option value="pendiente">Pendiente</option>
-        <option value="pagado">Pagado</option>
-      </select>
-    </label>
-    <label>Notas<input name="notes"></label>
-    <button class="btn" id="saveCut">Guardar</button>`;
-}
-
-function renderVales() {
-  const closed = isMonthClosed();
-  const rows =
-    currentData()
-      .vales.map(
-        (v) => `
-    <tr>
-      <td>${v.date || ""}</td>
-      <td>${workerById(v.workerId)?.name || "—"}</td>
-      <td>${money(v.amount)}</td>
-      <td>${v.notes || ""}</td>
-      <td><button class="btn small" data-del-vale="${v.id}" ${closed ? "disabled" : ""}>Borrar</button></td>
-    </tr>`
-      )
-      .join("") || `<tr><td colspan="5" class="muted">Sin vales este mes.</td></tr>`;
-
-  document.getElementById("view-vales").innerHTML = `
-    <div class="toolbar">
-      <p class="muted">El vale es por funcionario, nunca por el grupo entero${closed ? ". Mes cerrado." : "."}</p>
-      <button class="btn" id="addVale" data-requires-open ${closed ? "disabled" : ""}>Registrar vale</button>
-    </div>
-    <div class="card">
-      <table>
-        <thead><tr><th>Fecha</th><th>Funcionario</th><th>Monto</th><th>Motivo</th><th></th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table>
-    </div>`;
-}
-
-function valeForm() {
-  const opts = state.workers.map((w) => `<option value="${w.id}">${w.name}</option>`).join("");
-  return `
-    <label>Funcionario<select name="workerId">${opts}</select></label>
-    <div class="form-row">
-      <label>Fecha<input type="date" name="date" value="${new Date().toISOString().slice(0, 10)}"></label>
-      <label>Monto<input type="number" step="0.01" name="amount" value="0"></label>
-    </div>
-    <label>Motivo<input name="notes"></label>
-    <button class="btn" id="saveVale">Guardar</button>`;
-}
-
-function renderPayroll() {
-  const t = monthTotals();
-  const rows = state.workers
-    .map((w) => {
-      const x = t.byWorker[w.id] || { earned: 0, paid: 0, pending: 0, vales: 0 };
-      return `<tr>
-      <td>${w.name}</td>
-      <td>${money(x.earned)}</td>
-      <td>${money(x.paid)}</td>
-      <td>${money(x.vales)}</td>
-      <td><strong>${money(x.pending - x.vales)}</strong></td>
-    </tr>`;
-    })
-    .join("");
-
-  document.getElementById("view-payroll").innerHTML = `
-    <div class="card">
-      <h3>Pagos de ${monthLabel(state.currentMonth)}</h3>
-      <p class="muted">Marcá los cortes como pagados en Cortes. Acá ves el consolidado ya descontado de vales.</p>
-      <table>
-        <thead><tr><th>Funcionario</th><th>Devengado</th><th>Ya pagado</th><th>Vales</th><th>Saldo</th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table>
-    </div>`;
-}
-
-function renderSettings() {
-  document.getElementById("view-settings").innerHTML = `
-    <div class="card grid">
-      <label>Nombre del taller / archivo
-        <input id="workspaceInput" value="${state.workspaceName}">
-      </label>
-      <div class="toolbar">
-        <button class="btn" id="saveName">Guardar nombre</button>
-        <button class="btn secondary" id="exportBtn2">Exportar JSON</button>
-      </div>
-      <p class="muted">Al importar, los datos se fusionan: no se borra lo que ya existe. Si tenés enero y marzo, importá febrero y se completa el historial.</p>
-      <p class="muted">Instalá la app desde el navegador del celular (Compartir → Agregar a inicio / Instalar app) para usarla como icono en la pantalla principal.</p>
-    </div>`;
-}
-
-function render() {
-  renderChrome();
-  const map = {
-    dashboard: renderDashboard,
-    workers: renderWorkers,
-    garments: renderGarments,
-    groups: renderGroups,
-    cuts: renderCuts,
-    vales: renderVales,
-    payroll: renderPayroll,
-    settings: renderSettings
-  };
-  map[state.currentView]();
-}
-
-function mergeById(existing = [], incoming = []) {
-  const map = new Map(existing.map((x) => [x.id, x]));
-  incoming.forEach((item) => {
-    if (!item || !item.id) {
-      map.set(uid("m"), { ...item, id: uid("m") });
+  function load() {
+    const raw = safeStorageGet();
+    if (!raw) {
+      ensureMonth(state.currentMonth);
       return;
     }
-    if (!map.has(item.id)) map.set(item.id, item);
-  });
-  return Array.from(map.values());
-}
-
-function importMerge(incoming) {
-  if (
-    incoming.workspaceName &&
-    incoming.workspaceName !== "Atelier Office" &&
-    state.workspaceName === "Atelier Office"
-  ) {
-    state.workspaceName = incoming.workspaceName;
-  }
-  state.workers = mergeById(state.workers, incoming.workers || []);
-  state.garments = mergeById(state.garments, incoming.garments || []);
-  const months = incoming.months || {};
-  Object.keys(months).forEach((key) => {
-    const cur = ensureMonth(key);
-    const add = months[key] || {};
-    if (add.status && cur.groups.length === 0 && cur.cuts.length === 0 && cur.vales.length === 0) {
-      cur.status = add.status;
-    } else if (add.status && !cur.status) {
-      cur.status = add.status;
-    }
-    cur.groups = mergeById(cur.groups, add.groups || []);
-    cur.cuts = mergeById(cur.cuts, add.cuts || []);
-    cur.vales = mergeById(cur.vales, add.vales || []);
-  });
-}
-
-function exportJSON() {
-  const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
-  const a = document.createElement("a");
-  const safe = state.workspaceName.toLowerCase().replace(/\s+/g, "-");
-  a.href = URL.createObjectURL(blob);
-  a.download = `${safe}-${state.currentMonth}.json`;
-  a.click();
-  toast("JSON exportado");
-}
-
-function collectGroupMembers(form) {
-  const members = [];
-  for (let i = 0; i < 8; i++) {
-    const workerId = form[`worker_${i}`]?.value;
-    const machine = form[`machine_${i}`]?.value;
-    if (workerId) members.push({ workerId, machine });
-  }
-  return members;
-}
-
-function guardClosedAction() {
-  if (isMonthClosed()) {
-    toast("Este mes está terminado. Reabrilo para editar.");
-    return true;
-  }
-  return false;
-}
-
-function hideLoader() {
-  const loader = document.getElementById("boot-loader");
-  const app = document.getElementById("appRoot");
-  app.hidden = false;
-  loader.classList.add("is-done");
-  setTimeout(() => {
-    loader.hidden = true;
-  }, 400);
-}
-
-function registerPWA() {
-  if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("./sw.js").catch(() => {});
-  }
-}
-
-function bind() {
-  document.getElementById("mainNav").addEventListener("click", (e) => {
-    const btn = e.target.closest(".nav-btn");
-    if (!btn) return;
-    state.currentView = btn.dataset.view;
-    render();
-  });
-
-  document.getElementById("themeToggle").addEventListener("click", () => {
-    setTheme(state.theme === "dark" ? "light" : "dark");
-  });
-
-  document.getElementById("monthSelect").addEventListener("change", (e) => {
-    state.currentMonth = e.target.value;
-    ensureMonth(state.currentMonth);
-    save();
-    render();
-  });
-
-  document.getElementById("newMonthBtn").addEventListener("click", () => {
-    const value = prompt("Mes nuevo (AAAA-MM)", monthKey(new Date()));
-    if (!value || !/^\d{4}-\d{2}$/.test(value)) return toast("Usá el formato 2026-02");
-    state.currentMonth = value;
-    ensureMonth(value);
-    save();
-    render();
-    toast(`${monthLabel(value)} listo. Empieza vacío y no toca los meses anteriores.`);
-  });
-
-  document.getElementById("toggleMonthStatusBtn").addEventListener("click", () => {
-    const data = currentData();
-    if (data.status === "cerrado") {
-      if (!confirm(`¿Reabrir ${monthLabel(state.currentMonth)} para seguir editando?`)) return;
-      data.status = "abierto";
-      toast("Mes reabierto");
-    } else {
-      if (
-        !confirm(
-          `¿Marcar ${monthLabel(state.currentMonth)} como terminado?\nNo se borra nada. Solo se bloquea la edición de grupos, cortes y vales de ese mes.`
-        )
-      )
-        return;
-      data.status = "cerrado";
-      toast("Mes marcado como terminado");
-    }
-    save();
-    render();
-  });
-
-  document.getElementById("exportBtn").addEventListener("click", exportJSON);
-  document.getElementById("importInput").addEventListener("change", async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
     try {
-      const incoming = JSON.parse(await file.text());
-      importMerge(incoming);
-      save();
-      render();
-      toast("Importado sin borrar lo existente");
-    } catch {
-      toast("JSON inválido");
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") {
+        if (typeof parsed.workspaceName === "string") state.workspaceName = parsed.workspaceName;
+        if (parsed.theme === "light" || parsed.theme === "dark") state.theme = parsed.theme;
+        if (typeof parsed.currentMonth === "string") state.currentMonth = parsed.currentMonth;
+        if (Array.isArray(parsed.workers)) state.workers = parsed.workers;
+        if (Array.isArray(parsed.garments)) state.garments = parsed.garments;
+        if (parsed.months && typeof parsed.months === "object") state.months = parsed.months;
+      }
+    } catch (e) {
+      /* datos corruptos: empezar limpio */
     }
-    e.target.value = "";
-  });
+    ensureMonth(state.currentMonth);
+    Object.keys(state.months).forEach(function (k) { ensureMonth(k); });
+  }
 
-  document.getElementById("modalClose").addEventListener("click", closeModal);
-  document.getElementById("modal").addEventListener("click", (e) => {
-    if (e.target.id === "modal") closeModal();
-  });
+  function toast(msg) {
+    const el = document.getElementById("toast");
+    if (!el) return;
+    el.textContent = String(msg);
+    el.hidden = false;
+    clearTimeout(toast._t);
+    toast._t = setTimeout(function () { el.hidden = true; }, 2800);
+  }
 
-  document.body.addEventListener("click", async (e) => {
-    if (e.target.id === "addWorker") openModal("Nuevo funcionario", workerForm());
-    if (e.target.id === "addGarment") openModal("Nueva prenda", garmentForm());
-    if (e.target.id === "addGroup") {
-      if (guardClosedAction()) return;
+  function fileToDataUrl(file) {
+    return new Promise(function (resolve) {
+      if (!file) return resolve("");
+      const reader = new FileReader();
+      reader.onload = function () { resolve(reader.result || ""); };
+      reader.onerror = function () { resolve(""); };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function workerById(id) {
+    return state.workers.find(function (w) { return w.id === id; });
+  }
+
+  function garmentById(id) {
+    return state.garments.find(function (g) { return g.id === id; });
+  }
+
+  function groupById(id) {
+    return currentData().groups.find(function (g) { return g.id === id; });
+  }
+
+  function splitForGroup(group) {
+    const members = Array.isArray(group.members) ? group.members : [];
+    const rectas = members.filter(function (m) { return m.machine === "recta"; });
+    const overs = members.filter(function (m) { return m.machine === "overlock"; });
+    const rectaPool = Number(group.rectaPay || 0);
+    const overPool = Number(group.overlockPay || 0);
+    const map = {};
+    rectas.forEach(function (m) {
+      map[m.workerId] = rectas.length ? rectaPool / rectas.length : 0;
+    });
+    overs.forEach(function (m) {
+      map[m.workerId] = overs.length ? overPool / overs.length : 0;
+    });
+    return map;
+  }
+
+  function monthTotals(key) {
+    key = key || state.currentMonth;
+    const data = ensureMonth(key);
+    let produced = 0;
+    let earned = 0;
+    let paid = 0;
+    let pending = 0;
+    const byWorker = {};
+    state.workers.forEach(function (w) {
+      byWorker[w.id] = { earned: 0, paid: 0, pending: 0, vales: 0 };
+    });
+
+    data.cuts.forEach(function (cut) {
+      const group = data.groups.find(function (g) { return g.id === cut.groupId; });
+      if (!group) return;
+      const qty = Number(cut.qty || 0);
+      produced += qty;
+      const per = splitForGroup(group);
+      Object.keys(per).forEach(function (wid) {
+        const amount = per[wid] * qty;
+        earned += amount;
+        if (!byWorker[wid]) byWorker[wid] = { earned: 0, paid: 0, pending: 0, vales: 0 };
+        byWorker[wid].earned += amount;
+        if (cut.status === "pagado") {
+          paid += amount;
+          byWorker[wid].paid += amount;
+        } else {
+          pending += amount;
+          byWorker[wid].pending += amount;
+        }
+      });
+    });
+
+    data.vales.forEach(function (v) {
+      if (!byWorker[v.workerId]) byWorker[v.workerId] = { earned: 0, paid: 0, pending: 0, vales: 0 };
+      byWorker[v.workerId].vales += Number(v.amount || 0);
+    });
+
+    const valesTotal = data.vales.reduce(function (a, v) { return a + Number(v.amount || 0); }, 0);
+    return { produced: produced, earned: earned, paid: paid, pending: pending, vales: valesTotal, byWorker: byWorker };
+  }
+
+  function openModal(title, html) {
+    document.getElementById("modalTitle").textContent = title;
+    document.getElementById("modalBody").innerHTML = html;
+    const modal = document.getElementById("modal");
+    modal.hidden = false;
+    modal.setAttribute("aria-hidden", "false");
+  }
+
+  function closeModal() {
+    const modal = document.getElementById("modal");
+    modal.hidden = true;
+    modal.setAttribute("aria-hidden", "true");
+    document.getElementById("modalBody").innerHTML = "";
+  }
+
+  function setTheme(theme) {
+    state.theme = theme === "light" ? "light" : "dark";
+    document.documentElement.setAttribute("data-theme", state.theme);
+    const btn = document.getElementById("themeToggle");
+    if (btn) btn.textContent = state.theme === "dark" ? "Cambiar a tema claro" : "Cambiar a tema oscuro";
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute("content", state.theme === "dark" ? "#12100e" : "#f4efe6");
+    save();
+  }
+
+  function updateMonthChrome() {
+    const closed = isMonthClosed();
+    const label = document.getElementById("monthStatusLabel");
+    const btn = document.getElementById("toggleMonthStatusBtn");
+    const banner = document.getElementById("monthLockedBanner");
+    const app = document.getElementById("appRoot");
+    if (label) {
+      label.textContent = closed ? "Estado: mes terminado" : "Estado: mes abierto";
+      label.className = "month-status " + (closed ? "closed" : "open");
+    }
+    if (btn) btn.textContent = closed ? "Reabrir mes" : "Marcar mes terminado";
+    if (banner) banner.hidden = !closed;
+    if (app) app.classList.toggle("is-month-closed", closed);
+  }
+
+  function renderMonthSelect() {
+    const sel = document.getElementById("monthSelect");
+    if (!sel) return;
+    const keys = Object.keys(state.months).sort();
+    if (keys.indexOf(state.currentMonth) === -1) keys.push(state.currentMonth);
+    sel.innerHTML = keys.map(function (k) {
+      const tag = ensureMonth(k).status === "cerrado" ? " · cerrado" : "";
+      const selected = k === state.currentMonth ? " selected" : "";
+      return '<option value="' + k + '"' + selected + ">" + monthLabel(k) + tag + "</option>";
+    }).join("");
+  }
+
+  function renderChrome() {
+    const title = document.getElementById("workspaceTitle");
+    if (title) title.textContent = state.workspaceName;
+    document.title = state.workspaceName + " — Jefe de oficina";
+    renderMonthSelect();
+    updateMonthChrome();
+
+    const titles = {
+      dashboard: ["Resumen del mes", "Panel"],
+      workers: ["Plantel", "Funcionarios"],
+      garments: ["Catálogo de producción", "Prendas"],
+      groups: ["Equipos de costura", "Grupos"],
+      cuts: ["Producción del mes", "Cortes terminados"],
+      vales: ["Adelantos individuales", "Vales"],
+      payroll: ["Liquidación", "Pagos"],
+      settings: ["Respaldos y preferencias", "Ajustes y datos"]
+    };
+    const pair = titles[state.currentView] || titles.dashboard;
+    const crumb = document.getElementById("crumb");
+    const pageTitle = document.getElementById("pageTitle");
+    if (crumb) crumb.textContent = pair[0] + " · " + monthLabel(state.currentMonth);
+    if (pageTitle) pageTitle.textContent = pair[1];
+
+    document.querySelectorAll(".nav-btn").forEach(function (b) {
+      b.classList.toggle("active", b.getAttribute("data-view") === state.currentView);
+    });
+    document.querySelectorAll(".view").forEach(function (v) {
+      v.classList.remove("active");
+    });
+    const active = document.getElementById("view-" + state.currentView);
+    if (active) active.classList.add("active");
+  }
+
+  function renderDashboard() {
+    const t = monthTotals();
+    const closed = isMonthClosed();
+    const rows = state.workers.length
+      ? state.workers.map(function (w) {
+          const x = t.byWorker[w.id] || { earned: 0, paid: 0, pending: 0, vales: 0 };
+          const net = x.pending - x.vales;
+          return "<tr><td>" + escapeHtml(w.name) + "</td><td>" + money(x.earned) + "</td><td>" +
+            money(x.paid) + "</td><td>" + money(x.pending) + "</td><td>" + money(x.vales) +
+            "</td><td><strong>" + money(net) + "</strong></td></tr>";
+        }).join("")
+      : '<tr><td colspan="6" class="muted">Todavía no hay funcionarios en este taller.</td></tr>';
+
+    document.getElementById("view-dashboard").innerHTML =
+      '<div class="grid stats">' +
+      '<article class="card"><h3>Prendas del mes</h3><p class="stat">' + t.produced + "</p></article>" +
+      '<article class="card"><h3>Producido</h3><p class="stat">' + money(t.earned) + "</p></article>" +
+      '<article class="card"><h3>Pendiente</h3><p class="stat">' + money(t.pending) + "</p></article>" +
+      '<article class="card"><h3>Vales</h3><p class="stat">' + money(t.vales) + "</p></article>" +
+      "</div>" +
+      '<div class="card" style="margin-top:14px">' +
+      "<h3>Por funcionario en " + monthLabel(state.currentMonth) + (closed ? " · terminado" : "") + "</h3>" +
+      '<p class="muted">El neto pendiente descuenta vales. Los meses no se mezclan. El cierre es manual.</p>' +
+      "<table><thead><tr><th>Funcionario</th><th>Devengado</th><th>Pagado</th><th>Pendiente</th><th>Vales</th><th>Neto a pagar</th></tr></thead>" +
+      "<tbody>" + rows + "</tbody></table></div>";
+  }
+
+  function escapeHtml(s) {
+    return String(s || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  function renderWorkers() {
+    const cards = state.workers.length
+      ? state.workers.map(function (w) {
+          const photo = w.photo
+            ? '<img class="person-photo" src="' + w.photo + '" alt="' + escapeHtml(w.name) + '">'
+            : '<div class="person-photo"></div>';
+          return '<article class="card person">' + photo +
+            "<h4>" + escapeHtml(w.name) + "</h4>" +
+            '<p class="muted">' + escapeHtml(w.notes || "Sin observaciones") + "</p>" +
+            '<div class="toolbar">' +
+            '<button type="button" class="btn small secondary" data-action="edit-worker" data-id="' + w.id + '">Editar</button>' +
+            '<button type="button" class="btn small" data-action="del-worker" data-id="' + w.id + '">Quitar</button>' +
+            "</div></article>";
+        }).join("")
+      : '<div class="card muted">Agregá el primer funcionario del taller.</div>';
+
+    document.getElementById("view-workers").innerHTML =
+      '<div class="toolbar">' +
+      '<p class="muted">Los funcionarios se mantienen entre meses.</p>' +
+      '<button type="button" class="btn" data-action="add-worker">Agregar funcionario</button>' +
+      '</div><div class="people">' + cards + "</div>";
+  }
+
+  function workerForm(worker) {
+    worker = worker || {};
+    return (
+      '<label>Nombre<input name="name" value="' + escapeHtml(worker.name || "") + '" required></label>' +
+      "<label>Notas<textarea name=\"notes\">" + escapeHtml(worker.notes || "") + "</textarea></label>" +
+      '<label>Foto de muestra<input type="file" name="photo" accept="image/*"></label>' +
+      (worker.photo ? '<img class="person-photo" src="' + worker.photo + '" alt="">' : "") +
+      '<button type="button" class="btn" data-action="save-worker" data-id="' + escapeHtml(worker.id || "") + '">Guardar</button>'
+    );
+  }
+
+  function renderGarments() {
+    const cards = state.garments.length
+      ? state.garments.map(function (g) {
+          const photo = g.photo
+            ? '<img class="garment-photo" src="' + g.photo + '" alt="' + escapeHtml(g.name) + '">'
+            : '<div class="garment-photo"></div>';
+          return '<article class="card gcard">' + photo +
+            "<h4>" + escapeHtml(g.name) + "</h4>" +
+            '<span class="badge">' + labelType(g.type) + "</span>" +
+            '<p class="muted">' + escapeHtml(g.notes || "") + "</p>" +
+            '<div class="toolbar">' +
+            '<button type="button" class="btn small secondary" data-action="edit-garment" data-id="' + g.id + '">Editar</button>' +
+            '<button type="button" class="btn small" data-action="del-garment" data-id="' + g.id + '">Quitar</button>' +
+            "</div></article>";
+        }).join("")
+      : '<div class="card muted">Cargá las prendas que se confeccionan.</div>';
+
+    document.getElementById("view-garments").innerHTML =
+      '<div class="toolbar">' +
+      '<p class="muted">Tejido plano, malla u otro.</p>' +
+      '<button type="button" class="btn" data-action="add-garment">Agregar prenda</button>' +
+      '</div><div class="cards">' + cards + "</div>";
+  }
+
+  function garmentForm(g) {
+    g = g || {};
+    return (
+      '<label>Nombre de la prenda<input name="name" value="' + escapeHtml(g.name || "") + '" required></label>' +
+      "<label>Tipo<select name=\"type\">" +
+      '<option value="plano"' + (g.type === "plano" ? " selected" : "") + ">Tejido plano</option>" +
+      '<option value="malla"' + (g.type === "malla" ? " selected" : "") + ">Malla</option>" +
+      '<option value="otro"' + (g.type === "otro" || !g.type ? " selected" : "") + ">Otro</option>" +
+      "</select></label>" +
+      "<label>Notas<textarea name=\"notes\">" + escapeHtml(g.notes || "") + "</textarea></label>" +
+      '<label>Foto de muestra<input type="file" name="photo" accept="image/*"></label>' +
+      '<button type="button" class="btn" data-action="save-garment" data-id="' + escapeHtml(g.id || "") + '">Guardar</button>'
+    );
+  }
+
+  function renderGroups() {
+    const data = currentData();
+    const closed = isMonthClosed();
+    const cards = data.groups.length
+      ? data.groups.map(function (g) {
+          const garment = garmentById(g.garmentId);
+          const members = (g.members || []).map(function (m) {
+            const w = workerById(m.workerId);
+            return (w ? w.name : "—") + " (" + m.machine + ")";
+          }).join(" · ");
+          return '<article class="card"><h4>' + escapeHtml(g.name) + "</h4>" +
+            "<p>" + escapeHtml(garment ? garment.name : "Sin prenda") + " · " + money(g.pricePerPiece) + " / prenda</p>" +
+            '<p class="muted">Recta ' + money(g.rectaPay) + " · Overlock " + money(g.overlockPay) + "</p>" +
+            "<p>" + escapeHtml(members || "Sin integrantes") + "</p>" +
+            '<div class="toolbar">' +
+            '<button type="button" class="btn small secondary" data-action="edit-group" data-id="' + g.id + '"' + (closed ? " disabled" : "") + ">Editar</button>" +
+            '<button type="button" class="btn small" data-action="del-group" data-id="' + g.id + '"' + (closed ? " disabled" : "") + ">Quitar</button>" +
+            "</div></article>";
+        }).join("")
+      : '<div class="card muted">Creá un grupo de 1, 2 o 3 personas y definí el pago por máquina.</div>';
+
+    document.getElementById("view-groups").innerHTML =
+      '<div class="toolbar">' +
+      '<p class="muted">Valores de recta y overlock editables por grupo' + (closed ? ". Mes cerrado: solo lectura." : ".") + "</p>" +
+      '<button type="button" class="btn" data-action="add-group"' + (closed ? " disabled" : "") + ">Crear grupo</button>" +
+      '</div><div class="cards">' + cards + "</div>";
+  }
+
+  function groupForm(group) {
+    group = group || {};
+    const members = group.members && group.members.length
+      ? group.members
+      : [{ workerId: "", machine: "recta" }];
+
+    function workerOpts(selected) {
+      return state.workers.map(function (w) {
+        return '<option value="' + w.id + '"' + (w.id === selected ? " selected" : "") + ">" + escapeHtml(w.name) + "</option>";
+      }).join("");
+    }
+
+    const garmentOpts = state.garments.map(function (g) {
+      return '<option value="' + g.id + '"' + (g.id === group.garmentId ? " selected" : "") + ">" + escapeHtml(g.name) + "</option>";
+    }).join("");
+
+    const rows = members.map(function (m, i) {
+      return '<div class="form-row member-row">' +
+        "<label>Funcionario " + (i + 1) +
+        '<select name="worker_' + i + '"><option value="">—</option>' + workerOpts(m.workerId) + "</select></label>" +
+        "<label>Máquina<select name=\"machine_" + i + '">' +
+        '<option value="recta"' + (m.machine === "recta" ? " selected" : "") + ">Recta</option>" +
+        '<option value="overlock"' + (m.machine === "overlock" ? " selected" : "") + ">Overlock</option>" +
+        "</select></label></div>";
+    }).join("");
+
+    return (
+      '<label>Nombre del grupo<input name="name" value="' + escapeHtml(group.name || "") + '" required></label>' +
+      '<label>Prenda<select name="garmentId"><option value="">—</option>' + garmentOpts + "</select></label>" +
+      '<div class="form-row">' +
+      '<label>Precio por prenda (corte)<input type="number" step="0.01" name="pricePerPiece" value="' + (group.pricePerPiece != null ? group.pricePerPiece : 1.4) + '"></label>' +
+      '<label>Pago recta / prenda<input type="number" step="0.01" name="rectaPay" value="' + (group.rectaPay != null ? group.rectaPay : 1) + '"></label>' +
+      "</div>" +
+      '<label>Pago overlock / prenda<input type="number" step="0.01" name="overlockPay" value="' + (group.overlockPay != null ? group.overlockPay : 0.4) + '"></label>' +
+      '<p class="muted">Ejemplo: corte R$ 1,40 · recta R$ 1,00 (2 rectas → R$ 0,50 c/u) · overlock R$ 0,40.</p>' +
+      '<div id="memberFields">' + rows + "</div>" +
+      '<button type="button" class="btn secondary" data-action="add-member-row">Agregar integrante</button>' +
+      '<button type="button" class="btn" data-action="save-group" data-id="' + escapeHtml(group.id || "") + '">Guardar grupo</button>'
+    );
+  }
+
+  function renderCuts() {
+    const data = currentData();
+    const closed = isMonthClosed();
+    const rows = data.cuts.length
+      ? data.cuts.map(function (c) {
+          const g = data.groups.find(function (x) { return x.id === c.groupId; });
+          return "<tr><td>" + escapeHtml(c.date || "") + "</td><td>" + escapeHtml(g ? g.name : "—") +
+            "</td><td>" + c.qty + '</td><td><span class="badge ' + (c.status === "pagado" ? "ok" : "warn") + '">' +
+            escapeHtml(c.status) + "</span></td><td>" + escapeHtml(c.notes || "") + "</td><td>" +
+            '<button type="button" class="btn small secondary" data-action="toggle-cut" data-id="' + c.id + '"' +
+            (closed ? " disabled" : "") + ">" + (c.status === "pagado" ? "Marcar pendiente" : "Marcar pagado") + "</button> " +
+            '<button type="button" class="btn small" data-action="del-cut" data-id="' + c.id + '"' +
+            (closed ? " disabled" : "") + ">Borrar</button></td></tr>";
+        }).join("")
+      : '<tr><td colspan="6" class="muted">No hay cortes en este mes.</td></tr>';
+
+    document.getElementById("view-cuts").innerHTML =
+      '<div class="toolbar">' +
+      '<p class="muted">Cada corte pertenece al mes activo' + (closed ? ". Mes cerrado." : ".") + "</p>" +
+      '<button type="button" class="btn" data-action="add-cut"' + (closed ? " disabled" : "") + ">Registrar corte terminado</button>" +
+      '</div><div class="card"><table><thead><tr><th>Fecha</th><th>Grupo</th><th>Prendas</th><th>Estado</th><th>Notas</th><th></th></tr></thead><tbody>' +
+      rows + "</tbody></table></div>";
+  }
+
+  function cutForm() {
+    const opts = currentData().groups.map(function (g) {
+      return '<option value="' + g.id + '">' + escapeHtml(g.name) + "</option>";
+    }).join("");
+    const today = new Date().toISOString().slice(0, 10);
+    return (
+      '<label>Grupo<select name="groupId">' + opts + "</select></label>" +
+      '<div class="form-row">' +
+      '<label>Fecha<input type="date" name="date" value="' + today + '"></label>' +
+      '<label>Prendas totales<input type="number" name="qty" min="1" value="1"></label>' +
+      "</div>" +
+      '<label>Estado<select name="status"><option value="pendiente">Pendiente</option><option value="pagado">Pagado</option></select></label>' +
+      '<label>Notas<input name="notes"></label>' +
+      '<button type="button" class="btn" data-action="save-cut">Guardar</button>'
+    );
+  }
+
+  function renderVales() {
+    const closed = isMonthClosed();
+    const rows = currentData().vales.length
+      ? currentData().vales.map(function (v) {
+          const w = workerById(v.workerId);
+          return "<tr><td>" + escapeHtml(v.date || "") + "</td><td>" + escapeHtml(w ? w.name : "—") +
+            "</td><td>" + money(v.amount) + "</td><td>" + escapeHtml(v.notes || "") +
+            '</td><td><button type="button" class="btn small" data-action="del-vale" data-id="' + v.id + '"' +
+            (closed ? " disabled" : "") + ">Borrar</button></td></tr>";
+        }).join("")
+      : '<tr><td colspan="5" class="muted">Sin vales este mes.</td></tr>';
+
+    document.getElementById("view-vales").innerHTML =
+      '<div class="toolbar">' +
+      '<p class="muted">El vale es por funcionario, no por grupo' + (closed ? ". Mes cerrado." : ".") + "</p>" +
+      '<button type="button" class="btn" data-action="add-vale"' + (closed ? " disabled" : "") + ">Registrar vale</button>" +
+      '</div><div class="card"><table><thead><tr><th>Fecha</th><th>Funcionario</th><th>Monto</th><th>Motivo</th><th></th></tr></thead><tbody>' +
+      rows + "</tbody></table></div>";
+  }
+
+  function valeForm() {
+    const opts = state.workers.map(function (w) {
+      return '<option value="' + w.id + '">' + escapeHtml(w.name) + "</option>";
+    }).join("");
+    const today = new Date().toISOString().slice(0, 10);
+    return (
+      '<label>Funcionario<select name="workerId">' + opts + "</select></label>" +
+      '<div class="form-row">' +
+      '<label>Fecha<input type="date" name="date" value="' + today + '"></label>' +
+      '<label>Monto<input type="number" step="0.01" name="amount" value="0"></label>' +
+      "</div>" +
+      '<label>Motivo<input name="notes"></label>' +
+      '<button type="button" class="btn" data-action="save-vale">Guardar</button>'
+    );
+  }
+
+  function renderPayroll() {
+    const t = monthTotals();
+    const rows = state.workers.map(function (w) {
+      const x = t.byWorker[w.id] || { earned: 0, paid: 0, pending: 0, vales: 0 };
+      return "<tr><td>" + escapeHtml(w.name) + "</td><td>" + money(x.earned) + "</td><td>" +
+        money(x.paid) + "</td><td>" + money(x.vales) + "</td><td><strong>" +
+        money(x.pending - x.vales) + "</strong></td></tr>";
+    }).join("");
+
+    document.getElementById("view-payroll").innerHTML =
+      '<div class="card"><h3>Pagos de ' + monthLabel(state.currentMonth) + "</h3>" +
+      '<p class="muted">Marcá los cortes como pagados en Cortes. Acá ves el consolidado con vales descontados.</p>' +
+      "<table><thead><tr><th>Funcionario</th><th>Devengado</th><th>Ya pagado</th><th>Vales</th><th>Saldo</th></tr></thead><tbody>" +
+      rows + "</tbody></table></div>";
+  }
+
+  function renderSettings() {
+    document.getElementById("view-settings").innerHTML =
+      '<div class="card grid">' +
+      '<label>Nombre del taller / archivo<input id="workspaceInput" value="' + escapeHtml(state.workspaceName) + '"></label>' +
+      '<div class="toolbar">' +
+      '<button type="button" class="btn" data-action="save-name">Guardar nombre</button>' +
+      '<button type="button" class="btn secondary" data-action="export">Exportar JSON</button>' +
+      "</div>" +
+      '<p class="muted">Al importar, los datos se fusionan sin borrar lo existente.</p>' +
+      '<p class="muted">En el celular: menú del navegador → Agregar a pantalla de inicio.</p>' +
+      "</div>";
+  }
+
+  function render() {
+    try {
+      renderChrome();
+      const map = {
+        dashboard: renderDashboard,
+        workers: renderWorkers,
+        garments: renderGarments,
+        groups: renderGroups,
+        cuts: renderCuts,
+        vales: renderVales,
+        payroll: renderPayroll,
+        settings: renderSettings
+      };
+      (map[state.currentView] || renderDashboard)();
+    } catch (err) {
+      console.error(err);
+      toast("Error al dibujar la pantalla");
+    }
+  }
+
+  function mergeById(existing, incoming) {
+    existing = Array.isArray(existing) ? existing : [];
+    incoming = Array.isArray(incoming) ? incoming : [];
+    const map = new Map();
+    existing.forEach(function (x) {
+      if (x && x.id) map.set(x.id, x);
+    });
+    incoming.forEach(function (item) {
+      if (!item) return;
+      if (!item.id) {
+        const id = uid("m");
+        map.set(id, Object.assign({}, item, { id: id }));
+        return;
+      }
+      if (!map.has(item.id)) map.set(item.id, item);
+    });
+    return Array.from(map.values());
+  }
+
+  function importMerge(incoming) {
+    if (!incoming || typeof incoming !== "object") return;
+    if (incoming.workspaceName && state.workspaceName === "Atelier Office") {
+      state.workspaceName = incoming.workspaceName;
+    }
+    state.workers = mergeById(state.workers, incoming.workers);
+    state.garments = mergeById(state.garments, incoming.garments);
+    const months = incoming.months || {};
+    Object.keys(months).forEach(function (key) {
+      const cur = ensureMonth(key);
+      const add = months[key] || {};
+      if (add.status && !cur.groups.length && !cur.cuts.length && !cur.vales.length) {
+        cur.status = add.status;
+      }
+      cur.groups = mergeById(cur.groups, add.groups);
+      cur.cuts = mergeById(cur.cuts, add.cuts);
+      cur.vales = mergeById(cur.vales, add.vales);
+    });
+  }
+
+  function exportJSON() {
+    const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
+    const a = document.createElement("a");
+    const safe = String(state.workspaceName || "taller").toLowerCase().replace(/\s+/g, "-");
+    a.href = URL.createObjectURL(blob);
+    a.download = safe + "-" + state.currentMonth + ".json";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    toast("JSON exportado");
+  }
+
+  function collectGroupMembers(root) {
+    const members = [];
+    for (let i = 0; i < 12; i++) {
+      const wEl = root.querySelector('[name="worker_' + i + '"]');
+      const mEl = root.querySelector('[name="machine_' + i + '"]');
+      if (!wEl) continue;
+      const workerId = wEl.value;
+      if (workerId) members.push({ workerId: workerId, machine: (mEl && mEl.value) || "recta" });
+    }
+    return members;
+  }
+
+  function guardClosed() {
+    if (isMonthClosed()) {
+      toast("Este mes está terminado. Reabrilo para editar.");
+      return true;
+    }
+    return false;
+  }
+
+  function hideLoader() {
+    const loader = document.getElementById("boot-loader");
+    const app = document.getElementById("appRoot");
+    if (app) {
+      app.hidden = false;
+      app.removeAttribute("hidden");
+    }
+    if (loader) {
+      loader.classList.add("is-done");
+      loader.style.pointerEvents = "none";
+      setTimeout(function () {
+        loader.hidden = true;
+        loader.style.display = "none";
+      }, 350);
+    }
+  }
+
+  function registerPWA() {
+    if (!("serviceWorker" in navigator)) return;
+    navigator.serviceWorker.register("./sw.js").catch(function () {});
+  }
+
+  function val(root, name) {
+    const el = root.querySelector('[name="' + name + '"]');
+    return el ? el.value : "";
+  }
+
+  async function onAction(action, el, e) {
+    const id = el.getAttribute("data-id") || "";
+
+    if (action === "add-worker") {
+      openModal("Nuevo funcionario", workerForm());
+      return;
+    }
+    if (action === "add-garment") {
+      openModal("Nueva prenda", garmentForm());
+      return;
+    }
+    if (action === "add-group") {
+      if (guardClosed()) return;
       openModal("Nuevo grupo", groupForm());
+      return;
     }
-    if (e.target.id === "addCut") {
-      if (guardClosedAction()) return;
+    if (action === "add-cut") {
+      if (guardClosed()) return;
       if (!currentData().groups.length) return toast("Primero creá un grupo");
       openModal("Corte terminado", cutForm());
+      return;
     }
-    if (e.target.id === "addVale") {
-      if (guardClosedAction()) return;
+    if (action === "add-vale") {
+      if (guardClosed()) return;
       if (!state.workers.length) return toast("Primero agregá funcionarios");
       openModal("Vale / adelanto", valeForm());
+      return;
     }
-    if (e.target.id === "exportBtn2") exportJSON();
-
-    if (e.target.id === "saveName") {
-      state.workspaceName = document.getElementById("workspaceInput").value.trim() || state.workspaceName;
+    if (action === "export") {
+      exportJSON();
+      return;
+    }
+    if (action === "save-name") {
+      const input = document.getElementById("workspaceInput");
+      state.workspaceName = (input && input.value.trim()) || state.workspaceName;
       save();
       render();
       toast("Nombre actualizado");
+      return;
     }
-
-    if (e.target.dataset.editWorker) {
-      openModal("Editar funcionario", workerForm(workerById(e.target.dataset.editWorker)));
-      document.getElementById("saveWorker").dataset.id = e.target.dataset.editWorker;
+    if (action === "edit-worker") {
+      openModal("Editar funcionario", workerForm(workerById(id)));
+      return;
     }
-    if (e.target.dataset.delWorker) {
-      state.workers = state.workers.filter((w) => w.id !== e.target.dataset.delWorker);
+    if (action === "del-worker") {
+      if (!confirm("¿Quitar este funcionario?")) return;
+      state.workers = state.workers.filter(function (w) { return w.id !== id; });
       save();
       render();
+      return;
     }
-    if (e.target.dataset.editGarment) {
-      openModal("Editar prenda", garmentForm(garmentById(e.target.dataset.editGarment)));
-      document.getElementById("saveGarment").dataset.id = e.target.dataset.editGarment;
+    if (action === "edit-garment") {
+      openModal("Editar prenda", garmentForm(garmentById(id)));
+      return;
     }
-    if (e.target.dataset.delGarment) {
-      state.garments = state.garments.filter((g) => g.id !== e.target.dataset.delGarment);
+    if (action === "del-garment") {
+      if (!confirm("¿Quitar esta prenda?")) return;
+      state.garments = state.garments.filter(function (g) { return g.id !== id; });
       save();
       render();
+      return;
     }
-    if (e.target.dataset.editGroup) {
-      if (guardClosedAction()) return;
-      const g = groupById(e.target.dataset.editGroup);
-      openModal("Editar grupo", groupForm(g));
-      document.getElementById("saveGroup").dataset.id = e.target.dataset.editGroup;
+    if (action === "edit-group") {
+      if (guardClosed()) return;
+      openModal("Editar grupo", groupForm(groupById(id)));
+      return;
     }
-    if (e.target.dataset.delGroup) {
-      if (guardClosedAction()) return;
-      currentData().groups = currentData().groups.filter((g) => g.id !== e.target.dataset.delGroup);
+    if (action === "del-group") {
+      if (guardClosed()) return;
+      if (!confirm("¿Quitar este grupo?")) return;
+      currentData().groups = currentData().groups.filter(function (g) { return g.id !== id; });
       save();
       render();
+      return;
     }
-    if (e.target.dataset.toggleCut) {
-      if (guardClosedAction()) return;
-      const cut = currentData().cuts.find((c) => c.id === e.target.dataset.toggleCut);
+    if (action === "toggle-cut") {
+      if (guardClosed()) return;
+      const cut = currentData().cuts.find(function (c) { return c.id === id; });
       if (cut) cut.status = cut.status === "pagado" ? "pendiente" : "pagado";
       save();
       render();
+      return;
     }
-    if (e.target.dataset.delCut) {
-      if (guardClosedAction()) return;
-      currentData().cuts = currentData().cuts.filter((c) => c.id !== e.target.dataset.delCut);
+    if (action === "del-cut") {
+      if (guardClosed()) return;
+      currentData().cuts = currentData().cuts.filter(function (c) { return c.id !== id; });
       save();
       render();
+      return;
     }
-    if (e.target.dataset.delVale) {
-      if (guardClosedAction()) return;
-      currentData().vales = currentData().vales.filter((v) => v.id !== e.target.dataset.delVale);
+    if (action === "del-vale") {
+      if (guardClosed()) return;
+      currentData().vales = currentData().vales.filter(function (v) { return v.id !== id; });
       save();
       render();
+      return;
     }
-
-    if (e.target.id === "addMemberRow") {
+    if (action === "add-member-row") {
       const box = document.getElementById("memberFields");
+      if (!box) return;
       const i = box.querySelectorAll(".member-row").length;
-      const opts = state.workers.map((w) => `<option value="${w.id}">${w.name}</option>`).join("");
+      const opts = state.workers.map(function (w) {
+        return '<option value="' + w.id + '">' + escapeHtml(w.name) + "</option>";
+      }).join("");
       box.insertAdjacentHTML(
         "beforeend",
-        `
-        <div class="form-row member-row">
-          <label>Funcionario ${i + 1}<select name="worker_${i}"><option value="">—</option>${opts}</select></label>
-          <label>Máquina<select name="machine_${i}"><option value="recta">Recta</option><option value="overlock">Overlock</option></select></label>
-        </div>`
+        '<div class="form-row member-row">' +
+          "<label>Funcionario " + (i + 1) +
+          '<select name="worker_' + i + '"><option value="">—</option>' + opts + "</select></label>" +
+          "<label>Máquina<select name=\"machine_" + i + '">' +
+          '<option value="recta">Recta</option><option value="overlock">Overlock</option>' +
+          "</select></label></div>"
       );
+      return;
     }
-
-    if (e.target.id === "saveWorker") {
-      const form = e.target.closest(".modal-body");
-      const photoInput = form.querySelector('[name="photo"]');
-      const photo = await fileToDataUrl(photoInput.files[0]);
-      const id = e.target.dataset.id || uid("w");
-      const prev = workerById(id);
+    if (action === "save-worker") {
+      const root = el.closest(".modal-body");
+      if (!root) return;
+      const photoInput = root.querySelector('[name="photo"]');
+      const photo = await fileToDataUrl(photoInput && photoInput.files && photoInput.files[0]);
+      const newId = id || uid("w");
+      const prev = workerById(newId);
+      const name = val(root, "name").trim();
+      if (!name) return toast("Poné un nombre");
       const item = {
-        id,
-        name: form.querySelector('[name="name"]').value,
-        notes: form.querySelector('[name="notes"]').value,
-        photo: photo || prev?.photo || ""
+        id: newId,
+        name: name,
+        notes: val(root, "notes"),
+        photo: photo || (prev && prev.photo) || ""
       };
-      const idx = state.workers.findIndex((w) => w.id === id);
+      const idx = state.workers.findIndex(function (w) { return w.id === newId; });
       if (idx >= 0) state.workers[idx] = item;
       else state.workers.push(item);
       save();
       closeModal();
       render();
+      toast("Funcionario guardado");
+      return;
     }
-
-    if (e.target.id === "saveGarment") {
-      const form = e.target.closest(".modal-body");
-      const photo = await fileToDataUrl(form.querySelector('[name="photo"]').files[0]);
-      const id = e.target.dataset.id || uid("g");
-      const prev = garmentById(id);
+    if (action === "save-garment") {
+      const root = el.closest(".modal-body");
+      if (!root) return;
+      const photoInput = root.querySelector('[name="photo"]');
+      const photo = await fileToDataUrl(photoInput && photoInput.files && photoInput.files[0]);
+      const newId = id || uid("g");
+      const prev = garmentById(newId);
+      const name = val(root, "name").trim();
+      if (!name) return toast("Poné un nombre");
       const item = {
-        id,
-        name: form.querySelector('[name="name"]').value,
-        type: form.querySelector('[name="type"]').value,
-        notes: form.querySelector('[name="notes"]').value,
-        photo: photo || prev?.photo || ""
+        id: newId,
+        name: name,
+        type: val(root, "type") || "otro",
+        notes: val(root, "notes"),
+        photo: photo || (prev && prev.photo) || ""
       };
-      const idx = state.garments.findIndex((g) => g.id === id);
+      const idx = state.garments.findIndex(function (g) { return g.id === newId; });
       if (idx >= 0) state.garments[idx] = item;
       else state.garments.push(item);
       save();
       closeModal();
       render();
+      toast("Prenda guardada");
+      return;
     }
-
-    if (e.target.id === "saveGroup") {
-      if (guardClosedAction()) return;
-      const form = e.target.closest(".modal-body");
-      const id = e.target.dataset.id || uid("gr");
+    if (action === "save-group") {
+      if (guardClosed()) return;
+      const root = el.closest(".modal-body");
+      if (!root) return;
+      const newId = id || uid("gr");
+      const name = val(root, "name").trim();
+      if (!name) return toast("Poné un nombre de grupo");
       const item = {
-        id,
-        name: form.querySelector('[name="name"]').value,
-        garmentId: form.querySelector('[name="garmentId"]').value,
-        pricePerPiece: Number(form.querySelector('[name="pricePerPiece"]').value || 0),
-        rectaPay: Number(form.querySelector('[name="rectaPay"]').value || 0),
-        overlockPay: Number(form.querySelector('[name="overlockPay"]').value || 0),
-        members: collectGroupMembers(form)
+        id: newId,
+        name: name,
+        garmentId: val(root, "garmentId"),
+        pricePerPiece: Number(val(root, "pricePerPiece") || 0),
+        rectaPay: Number(val(root, "rectaPay") || 0),
+        overlockPay: Number(val(root, "overlockPay") || 0),
+        members: collectGroupMembers(root)
       };
+      if (!item.members.length) return toast("Elegí al menos un funcionario");
       const arr = currentData().groups;
-      const idx = arr.findIndex((g) => g.id === id);
+      const idx = arr.findIndex(function (g) { return g.id === newId; });
       if (idx >= 0) arr[idx] = item;
       else arr.push(item);
       save();
       closeModal();
       render();
+      toast("Grupo guardado");
+      return;
     }
-
-    if (e.target.id === "saveCut") {
-      if (guardClosedAction()) return;
-      const form = e.target.closest(".modal-body");
+    if (action === "save-cut") {
+      if (guardClosed()) return;
+      const root = el.closest(".modal-body");
+      if (!root) return;
       currentData().cuts.push({
         id: uid("c"),
-        groupId: form.querySelector('[name="groupId"]').value,
-        date: form.querySelector('[name="date"]').value,
-        qty: Number(form.querySelector('[name="qty"]').value || 0),
-        status: form.querySelector('[name="status"]').value,
-        notes: form.querySelector('[name="notes"]').value
+        groupId: val(root, "groupId"),
+        date: val(root, "date"),
+        qty: Number(val(root, "qty") || 0),
+        status: val(root, "status") || "pendiente",
+        notes: val(root, "notes")
       });
       save();
       closeModal();
       render();
+      toast("Corte registrado");
+      return;
     }
-
-    if (e.target.id === "saveVale") {
-      if (guardClosedAction()) return;
-      const form = e.target.closest(".modal-body");
+    if (action === "save-vale") {
+      if (guardClosed()) return;
+      const root = el.closest(".modal-body");
+      if (!root) return;
       currentData().vales.push({
         id: uid("v"),
-        workerId: form.querySelector('[name="workerId"]').value,
-        date: form.querySelector('[name="date"]').value,
-        amount: Number(form.querySelector('[name="amount"]').value || 0),
-        notes: form.querySelector('[name="notes"]').value
+        workerId: val(root, "workerId"),
+        date: val(root, "date"),
+        amount: Number(val(root, "amount") || 0),
+        notes: val(root, "notes")
       });
       save();
       closeModal();
       render();
+      toast("Vale registrado");
+      return;
     }
+  }
+
+  function bind() {
+    document.addEventListener("click", function (e) {
+      const t = e.target;
+      if (!t || !t.closest) return;
+
+      /* navegación */
+      const navBtn = t.closest(".nav-btn");
+      if (navBtn && navBtn.getAttribute("data-view")) {
+        state.currentView = navBtn.getAttribute("data-view");
+        render();
+        return;
+      }
+
+      if (t.id === "themeToggle" || t.closest("#themeToggle")) {
+        setTheme(state.theme === "dark" ? "light" : "dark");
+        return;
+      }
+
+      if (t.id === "newMonthBtn" || t.closest("#newMonthBtn")) {
+        const value = prompt("Mes nuevo (AAAA-MM)", monthKey(new Date()));
+        if (!value || !/^\d{4}-\d{2}$/.test(value)) {
+          if (value) toast("Usá el formato 2026-02");
+          return;
+        }
+        state.currentMonth = value;
+        ensureMonth(value);
+        save();
+        render();
+        toast(monthLabel(value) + " listo. Empieza vacío.");
+        return;
+      }
+
+      if (t.id === "toggleMonthStatusBtn" || t.closest("#toggleMonthStatusBtn")) {
+        const data = currentData();
+        if (data.status === "cerrado") {
+          if (!confirm("¿Reabrir " + monthLabel(state.currentMonth) + "?")) return;
+          data.status = "abierto";
+          toast("Mes reabierto");
+        } else {
+          if (!confirm("¿Marcar " + monthLabel(state.currentMonth) + " como terminado?\nSolo se bloquea la edición de ese mes.")) return;
+          data.status = "cerrado";
+          toast("Mes marcado como terminado");
+        }
+        save();
+        render();
+        return;
+      }
+
+      if (t.id === "exportBtn" || t.closest("#exportBtn")) {
+        exportJSON();
+        return;
+      }
+
+      if (t.id === "modalClose" || t.closest("#modalClose")) {
+        closeModal();
+        return;
+      }
+
+      const modal = document.getElementById("modal");
+      if (modal && t === modal) {
+        closeModal();
+        return;
+      }
+
+      const actionEl = t.closest("[data-action]");
+      if (actionEl) {
+        const action = actionEl.getAttribute("data-action");
+        onAction(action, actionEl, e).catch(function (err) {
+          console.error(err);
+          toast("Error al ejecutar la acción");
+        });
+      }
+    });
+
+    const monthSelect = document.getElementById("monthSelect");
+    if (monthSelect) {
+      monthSelect.addEventListener("change", function (e) {
+        state.currentMonth = e.target.value;
+        ensureMonth(state.currentMonth);
+        save();
+        render();
+      });
+    }
+
+    const importInput = document.getElementById("importInput");
+    if (importInput) {
+      importInput.addEventListener("change", async function (e) {
+        const file = e.target.files && e.target.files[0];
+        if (!file) return;
+        try {
+          const text = await file.text();
+          const incoming = JSON.parse(text);
+          importMerge(incoming);
+          save();
+          render();
+          toast("Importado sin borrar lo existente");
+        } catch (err) {
+          toast("JSON inválido");
+        }
+        e.target.value = "";
+      });
+    }
+  }
+
+  /* inicio */
+  try {
+    load();
+    setTheme(state.theme || "dark");
+    bind();
+    render();
+    registerPWA();
+  } catch (err) {
+    console.error(err);
+  }
+
+  requestAnimationFrame(function () {
+    setTimeout(hideLoader, 300);
   });
-}
 
-load();
-setTheme(state.theme || "dark");
-bind();
-render();
-registerPWA();
-
-// Pequeña pausa para que se note el loader y no parpadee en dispositivos lentos
-requestAnimationFrame(() => {
-  setTimeout(hideLoader, 450);
-});
+  /* si algo falló, igual mostrar la app a los 2s */
+  setTimeout(hideLoader, 2000);
+})();
