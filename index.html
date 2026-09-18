@@ -28,13 +28,56 @@
   </div>
 
   <div class="app" id="appRoot" hidden>
-    <aside class="sidebar">
-      <div class="brand">
-        <div class="logo" aria-hidden="true">AO</div>
-        <div>
-          <p class="eyebrow">Módulo actual</p>
-          <h1 id="workspaceTitle">Atelier Office</h1>
+    <main class="main">
+      <header class="topbar">
+        <div class="topbar-left">
+          <div class="brand-inline">
+            <div class="logo" aria-hidden="true">AO</div>
+            <div>
+              <p class="crumb" id="crumb">Resumen del mes</p>
+              <h2 id="pageTitle">Panel</h2>
+            </div>
+          </div>
         </div>
+        <div class="top-actions">
+          <button class="btn secondary" id="exportBtn" type="button">Exportar</button>
+          <label class="btn secondary file-btn">
+            Importar
+            <input type="file" id="importInput" accept="application/json,.json" hidden />
+          </label>
+          <button class="menu-btn" id="menuBtn" type="button" aria-label="Abrir menú" aria-expanded="false" aria-controls="sideMenu">
+            <span class="menu-btn-lines" aria-hidden="true"></span>
+            <span class="menu-btn-text">Menú</span>
+          </button>
+        </div>
+      </header>
+
+      <div id="monthLockedBanner" class="locked-banner" hidden>
+        Este mes está marcado como <strong>terminado</strong>. Podés consultarlo, pero no editar producción, grupos ni vales. Reabrilo desde el menú si necesitás corregir algo.
+      </div>
+
+      <section id="view-dashboard" class="view active"></section>
+      <section id="view-workers" class="view"></section>
+      <section id="view-garments" class="view"></section>
+      <section id="view-groups" class="view"></section>
+      <section id="view-cuts" class="view"></section>
+      <section id="view-vales" class="view"></section>
+      <section id="view-payroll" class="view"></section>
+      <section id="view-settings" class="view"></section>
+    </main>
+
+    <div class="menu-overlay" id="menuOverlay" hidden></div>
+
+    <aside class="side-menu" id="sideMenu" aria-hidden="true">
+      <div class="side-menu-head">
+        <div class="brand">
+          <div class="logo" aria-hidden="true">AO</div>
+          <div>
+            <p class="eyebrow">Módulo actual</p>
+            <h1 id="workspaceTitle">Atelier Office</h1>
+          </div>
+        </div>
+        <button class="icon-btn side-close" id="menuCloseBtn" type="button" aria-label="Cerrar menú">×</button>
       </div>
 
       <label class="module-select">
@@ -46,14 +89,14 @@
       </label>
 
       <nav class="nav" id="mainNav">
-        <button class="nav-btn active" data-view="dashboard">Resumen</button>
-        <button class="nav-btn" data-view="workers">Funcionarios</button>
-        <button class="nav-btn" data-view="garments">Prendas</button>
-        <button class="nav-btn" data-view="groups">Grupos</button>
-        <button class="nav-btn" data-view="cuts">Cortes terminados</button>
-        <button class="nav-btn" data-view="vales">Vales / adelantos</button>
-        <button class="nav-btn" data-view="payroll">Pagos</button>
-        <button class="nav-btn" data-view="settings">Ajustes y datos</button>
+        <button type="button" class="nav-btn active" data-view="dashboard">Resumen</button>
+        <button type="button" class="nav-btn" data-view="workers">Funcionarios</button>
+        <button type="button" class="nav-btn" data-view="garments">Prendas</button>
+        <button type="button" class="nav-btn" data-view="groups">Grupos</button>
+        <button type="button" class="nav-btn" data-view="cuts">Cortes terminados</button>
+        <button type="button" class="nav-btn" data-view="vales">Vales / adelantos</button>
+        <button type="button" class="nav-btn" data-view="payroll">Pagos</button>
+        <button type="button" class="nav-btn" data-view="settings">Ajustes y datos</button>
       </nav>
 
       <div class="sidebar-foot">
@@ -69,35 +112,6 @@
         <button class="theme-toggle" id="themeToggle" type="button">Tema oscuro</button>
       </div>
     </aside>
-
-    <main class="main">
-      <header class="topbar">
-        <div>
-          <p class="crumb" id="crumb">Resumen del mes</p>
-          <h2 id="pageTitle">Panel</h2>
-        </div>
-        <div class="top-actions">
-          <button class="btn" id="exportBtn" type="button">Exportar JSON</button>
-          <label class="btn secondary file-btn">
-            Importar JSON
-            <input type="file" id="importInput" accept="application/json,.json" hidden />
-          </label>
-        </div>
-      </header>
-
-      <div id="monthLockedBanner" class="locked-banner" hidden>
-        Este mes está marcado como <strong>terminado</strong>. Podés consultarlo, pero no editar producción, grupos ni vales. Reabrilo desde el panel lateral si necesitás corregir algo.
-      </div>
-
-      <section id="view-dashboard" class="view active"></section>
-      <section id="view-workers" class="view"></section>
-      <section id="view-garments" class="view"></section>
-      <section id="view-groups" class="view"></section>
-      <section id="view-cuts" class="view"></section>
-      <section id="view-vales" class="view"></section>
-      <section id="view-payroll" class="view"></section>
-      <section id="view-settings" class="view"></section>
-    </main>
   </div>
 
   <div class="modal-backdrop" id="modal" hidden>
@@ -111,6 +125,6 @@
   </div>
 
   <div class="toast" id="toast" hidden></div>
-  <script src="app.js?v=3"></script>
+  <script src="app.js?v=4"></script>
 </body>
 </html>

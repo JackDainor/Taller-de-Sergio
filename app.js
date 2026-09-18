@@ -667,6 +667,35 @@
     }
   }
 
+  function openMenu() {
+    const menu = document.getElementById("sideMenu");
+    const overlay = document.getElementById("menuOverlay");
+    const btn = document.getElementById("menuBtn");
+    if (menu) {
+      menu.classList.add("is-open");
+      menu.setAttribute("aria-hidden", "false");
+    }
+    if (overlay) {
+      overlay.hidden = false;
+      overlay.removeAttribute("hidden");
+    }
+    if (btn) btn.setAttribute("aria-expanded", "true");
+    document.body.classList.add("menu-open");
+  }
+
+  function closeMenu() {
+    const menu = document.getElementById("sideMenu");
+    const overlay = document.getElementById("menuOverlay");
+    const btn = document.getElementById("menuBtn");
+    if (menu) {
+      menu.classList.remove("is-open");
+      menu.setAttribute("aria-hidden", "true");
+    }
+    if (overlay) overlay.hidden = true;
+    if (btn) btn.setAttribute("aria-expanded", "false");
+    document.body.classList.remove("menu-open");
+  }
+
   function registerPWA() {
     if (!("serviceWorker" in navigator)) return;
     navigator.serviceWorker.register("./sw.js").catch(function () {});
@@ -910,10 +939,28 @@
       const t = e.target;
       if (!t || !t.closest) return;
 
+      if (t.id === "menuBtn" || t.closest("#menuBtn")) {
+        const menu = document.getElementById("sideMenu");
+        if (menu && menu.classList.contains("is-open")) closeMenu();
+        else openMenu();
+        return;
+      }
+
+      if (t.id === "menuCloseBtn" || t.closest("#menuCloseBtn")) {
+        closeMenu();
+        return;
+      }
+
+      if (t.id === "menuOverlay") {
+        closeMenu();
+        return;
+      }
+
       /* navegación */
       const navBtn = t.closest(".nav-btn");
       if (navBtn && navBtn.getAttribute("data-view")) {
         state.currentView = navBtn.getAttribute("data-view");
+        closeMenu();
         render();
         return;
       }
@@ -1026,4 +1073,8 @@
 
   /* si algo falló, igual mostrar la app a los 2s */
   setTimeout(hideLoader, 2000);
+
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape") closeMenu();
+  });
 })();
