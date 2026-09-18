@@ -1,33 +1,21 @@
-Atelier Office — Jefe de oficina / funcionarios
-==============================================
+Taller Oficina — Menú lateral v5
+================================
 
-Abrí index.html o publicá la carpeta en GitHub + Vercel.
+CÓMO SUBIR A GITHUB + VERCEL (importante)
+1. Descomprimí este ZIP.
+2. Los archivos (index.html, app.js, styles.css, etc.) deben quedar
+   en la RAÍZ del repositorio, NO dentro de otra carpeta.
+3. En Vercel, Root Directory = vacío / raíz del repo.
+4. Después del deploy, abrí la web en ventana de INCÓGNITO.
+5. Debés ver arriba a la derecha un botón dorado "Menú"
+   y el texto "v5 · menú lateral" debajo del título.
 
-Novedades
-- Pantalla de carga al abrir
-- App instalable (PWA) en el celular: pantalla de inicio
-- Cierre MANUAL del mes: "Marcar mes terminado" / "Reabrir mes"
-  No se cierra solo. Un mes cerrado se puede consultar pero no editar
-  grupos, cortes ni vales de ese mes.
+Si NO ves "v5 · menú lateral", todavía está la versión vieja en caché.
+Solución: vaciar caché del navegador o incógnito.
 
-¿Necesito Supabase?
-NO, para esta versión no.
-Todo corre en el navegador (localStorage) + export/import JSON.
-GitHub + Vercel alcanza para hospedar la web estática.
-
-Supabase sí haría falta más adelante si querés:
-- varios dispositivos sincronizados en la nube
-- varios usuarios al mismo tiempo
-- login y base de datos compartida
-
-Instalar en el celular
-1. Abrí la URL de Vercel en Chrome/Safari
-2. Menú del navegador → "Agregar a pantalla de inicio" / "Instalar app"
-
-Uso rápido
-1. Ajustes → nombre del taller
-2. Funcionarios y prendas
-3. Grupos (recta / overlock)
-4. Cortes y vales del mes
-5. Cuando termines el mes → "Marcar mes terminado"
-6. Exportá JSON de respaldo de vez en cuando
+Qué incluye el menú lateral
+- Resumen, Funcionarios, Prendas, Grupos, Cortes, Vales, Pagos, Ajustes
+- Mes de trabajo / marcar mes terminado
+- Tema claro/oscuro
+- Se abre con el botón Menú (arriba derecha)
+- Se cierra con X, tocando afuera o Escape

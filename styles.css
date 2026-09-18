@@ -152,19 +152,26 @@ select, input, textarea {
 .btn.warn { background: var(--warn); color: #1c1308; }
 .file-btn { display: inline-block; }
 
+.version-tag {
+  margin: -8px 0 16px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
 /* Botón menú esquina derecha */
 .menu-btn {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  background: var(--ink);
-  color: var(--bg);
+  background: linear-gradient(145deg, #c4a574, #8a5a2b);
+  color: #1c1712;
   border: 0;
   border-radius: 12px;
-  padding: 10px 14px;
+  padding: 11px 16px;
   cursor: pointer;
   font: inherit;
-  font-weight: 600;
+  font-weight: 700;
+  box-shadow: 0 8px 20px rgba(138, 90, 43, 0.28);
 }
 .menu-btn-lines {
   width: 18px;
