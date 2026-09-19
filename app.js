@@ -509,28 +509,126 @@
     );
   }
 
+  function buildCutReceiptHtml(cutId) {
+    const data = currentData();
+    const cut = data.cuts.find(function (c) { return c.id === cutId; });
+    if (!cut) return null;
+    const assign = data.groups.find(function (x) { return x.id === cut.groupId; }) || {};
+    const garment = garmentById(assign.garmentId);
+    const per = splitForGroup(assign);
+    const qty = Number(cut.qty || 0);
+    const peopleRows = (assign.members || []).map(function (m) {
+      const w = workerById(m.workerId);
+      const unit = per[m.workerId] != null ? per[m.workerId] : 0;
+      const total = unit * qty;
+      return {
+        name: w ? w.name : "—",
+        machine: m.machine,
+        unit: unit,
+        total: total
+      };
+    });
+    const peopleHtml = peopleRows.map(function (p) {
+      return "<tr><td>" + escapeHtml(p.name) + "</td><td>" + escapeHtml(p.machine) +
+        "</td><td>" + money(p.unit) + "</td><td><strong>" + money(p.total) + "</strong></td></tr>";
+    }).join("") || '<tr><td colspan="4">Sin personas</td></tr>';
+    const photo = garment && garment.photo
+      ? '<img src="' + garment.photo + '" style="width:120px;height:120px;object-fit:cover;border-radius:10px;border:1px solid #ccc;">'
+      : '<div style="width:120px;height:120px;background:#eee;border-radius:10px;display:flex;align-items:center;justify-content:center;color:#888;font-size:12px;">Sin foto</div>';
+    const totalPay = peopleRows.reduce(function (a, p) { return a + p.total; }, 0);
+    return (
+      '<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><title>Comprobante de corte</title>' +
+      '<style>' +
+      'body{font-family:Arial,sans-serif;color:#1c1712;padding:24px;max-width:720px;margin:0 auto;}' +
+      'h1{font-size:20px;margin:0 0 4px;} h2{font-size:16px;margin:16px 0 8px;}' +
+      '.muted{color:#666;font-size:12px;} .row{display:flex;gap:16px;align-items:flex-start;margin:12px 0 18px;}' +
+      'table{width:100%;border-collapse:collapse;margin-top:8px;} th,td{border-bottom:1px solid #ddd;padding:8px;text-align:left;font-size:13px;}' +
+      'th{color:#666;font-weight:600;} .box{border:1px solid #ddd;border-radius:12px;padding:14px;margin-top:12px;}' +
+      '.badge{display:inline-block;padding:3px 8px;border-radius:999px;background:#f0e6d6;font-size:12px;}' +
+      '@media print{body{padding:0;} .no-print{display:none!important;}}' +
+      '</style></head><body>' +
+      '<p class="muted no-print">Si el diálogo de impresión se abre, elegí <strong>Guardar como PDF</strong>.</p>' +
+      "<h1>Comprobante de corte terminado</h1>" +
+      '<p class="muted">' + escapeHtml(state.workspaceName) + " · " + monthLabel(state.currentMonth) + "</p>" +
+      '<div class="row">' + photo +
+      "<div><h2 style=\"margin-top:0\">" + escapeHtml(garment ? garment.name : "Prenda") + "</h2>" +
+      '<p class="muted">' + (garment ? labelType(garment.type) : "") + "</p>" +
+      "<p><strong>Asignación:</strong> " + escapeHtml(assign.name || "—") + "</p>" +
+      "<p><strong>Fecha:</strong> " + escapeHtml(cut.date || "—") + "</p>" +
+      "<p><strong>Prendas:</strong> " + qty + ' &nbsp; <span class="badge">' + escapeHtml(cut.status || "") + "</span></p>" +
+      (cut.notes ? "<p><strong>Notas:</strong> " + escapeHtml(cut.notes) + "</p>" : "") +
+      "</div></div>" +
+      '<div class="box"><h2>Quiénes lo hicieron y cuánto corresponde</h2>' +
+      "<table><thead><tr><th>Funcionario</th><th>Máquina</th><th>Por prenda</th><th>Total (" + qty + ")</th></tr></thead><tbody>" +
+      peopleHtml +
+      '</tbody></table>' +
+      "<p style=\"margin-top:12px\"><strong>Total del corte:</strong> " + money(totalPay) + "</p>" +
+      '<p class="muted">Recta ' + money(assign.rectaPay) + " / prenda · Overlock " + money(assign.overlockPay) + " / prenda · Corte base " + money(assign.pricePerPiece) + " / prenda</p>" +
+      "</div>" +
+      '<p class="muted" style="margin-top:24px">Documento generado como comprobante para funcionarios · ' +
+      new Date().toLocaleString("es-PY") + "</p>" +
+      '<p class="no-print" style="margin-top:16px"><button onclick="window.print()" style="padding:10px 16px;font-size:14px;border-radius:8px;border:0;background:#1c1712;color:#fff;cursor:pointer;">Imprimir / Guardar PDF</button></p>' +
+      "<script>window.onload=function(){setTimeout(function(){window.print();},350);}<\\/script>" +
+      "</body></html>"
+    );
+  }
+
+  function downloadCutPdf(cutId) {
+    const html = buildCutReceiptHtml(cutId);
+    if (!html) return toast("No se encontró el corte");
+    const w = window.open("", "_blank");
+    if (!w) {
+      toast("Permití ventanas emergentes para descargar el PDF");
+      return;
+    }
+    w.document.open();
+    w.document.write(html);
+    w.document.close();
+    toast("Comprobante listo: elegí Guardar como PDF");
+  }
+
   function renderCuts() {
     const data = currentData();
     const closed = isMonthClosed();
-    const rows = data.cuts.length
+    const cards = data.cuts.length
       ? data.cuts.map(function (c) {
-          const g = data.groups.find(function (x) { return x.id === c.groupId; });
-          return "<tr><td>" + escapeHtml(c.date || "") + "</td><td>" + escapeHtml(g ? g.name : "—") +
-            "</td><td>" + c.qty + '</td><td><span class="badge ' + (c.status === "pagado" ? "ok" : "warn") + '">' +
-            escapeHtml(c.status) + "</span></td><td>" + escapeHtml(c.notes || "") + "</td><td>" +
+          const g = data.groups.find(function (x) { return x.id === c.groupId; }) || {};
+          const garment = garmentById(g.garmentId);
+          const per = splitForGroup(g);
+          const qty = Number(c.qty || 0);
+          const people = (g.members || []).map(function (m) {
+            const w = workerById(m.workerId);
+            const unit = per[m.workerId] != null ? per[m.workerId] : 0;
+            return escapeHtml(w ? w.name : "—") + " (" + escapeHtml(m.machine) + ") " + money(unit * qty);
+          }).join(" · ");
+          const photo = garment && garment.photo
+            ? '<img class="cut-thumb" src="' + garment.photo + '" alt="">'
+            : '<div class="cut-thumb empty"></div>';
+          return '<article class="card cut-card">' +
+            '<div class="cut-top">' + photo +
+            '<div class="cut-main">' +
+            "<h4>" + escapeHtml(garment ? garment.name : (g.name || "Corte")) + "</h4>" +
+            '<p class="muted">' + escapeHtml(g.name || "—") + " · " + escapeHtml(c.date || "") + "</p>" +
+            "<p><strong>" + qty + " prendas</strong> · <span class=\"badge " + (c.status === "pagado" ? "ok" : "warn") + '">' +
+            escapeHtml(c.status) + "</span></p>" +
+            '<p class="muted tight">' + (people || "Sin personas") + "</p>" +
+            (c.notes ? '<p class="muted tight">' + escapeHtml(c.notes) + "</p>" : "") +
+            "</div></div>" +
+            '<div class="toolbar cut-actions">' +
+            '<button type="button" class="btn small secondary" data-action="pdf-cut" data-id="' + c.id + '">Descargar PDF</button>' +
             '<button type="button" class="btn small secondary" data-action="toggle-cut" data-id="' + c.id + '"' +
-            (closed ? " disabled" : "") + ">" + (c.status === "pagado" ? "Marcar pendiente" : "Marcar pagado") + "</button> " +
+            (closed ? " disabled" : "") + ">" + (c.status === "pagado" ? "Pendiente" : "Pagado") + "</button>" +
             '<button type="button" class="btn small" data-action="del-cut" data-id="' + c.id + '"' +
-            (closed ? " disabled" : "") + ">Borrar</button></td></tr>";
+            (closed ? " disabled" : "") + ">Borrar</button>" +
+            "</div></article>";
         }).join("")
-      : '<tr><td colspan="6" class="muted">No hay cortes en este mes.</td></tr>';
+      : '<div class="card muted">No hay cortes terminados en este mes.</div>';
 
     document.getElementById("view-cuts").innerHTML =
       '<div class="toolbar">' +
-      '<p class="muted">Registrá cuántas prendas terminó cada asignación' + (closed ? ". Mes cerrado." : ".") + "</p>" +
+      '<p class="muted">Registrá prendas terminadas y descargá el PDF como comprobante' + (closed ? ". Mes cerrado." : ".") + "</p>" +
       '<button type="button" class="btn" data-action="add-cut"' + (closed ? " disabled" : "") + ">Registrar prendas terminadas</button>" +
-      '</div><div class="card"><table><thead><tr><th>Fecha</th><th>Asignación</th><th>Prendas</th><th>Estado</th><th>Notas</th><th></th></tr></thead><tbody>' +
-      rows + "</tbody></table></div>";
+      '</div><div class="cards cut-list">' + cards + "</div>";
   }
 
   function cutForm() {
@@ -835,6 +933,10 @@
       currentData().groups = currentData().groups.filter(function (g) { return g.id !== id; });
       save();
       render();
+      return;
+    }
+    if (action === "pdf-cut") {
+      downloadCutPdf(id);
       return;
     }
     if (action === "toggle-cut") {

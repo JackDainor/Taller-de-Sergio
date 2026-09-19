@@ -1,10 +1,9 @@
-Taller Oficina v6 — Asignar corte
-================================
+Taller Oficina v7 — Móvil + PDF
+===============================
 
-Cambios:
-- "Grupos" pasó a "Asignar corte"
-- Cada asignación muestra foto de la prenda, quiénes, a cuánto y resumen del mes
-- En Prendas ves si el corte ya está en producción o sin asignar
+- Interfaz optimizada para celular (letras más chicas, sin hacer zoom)
+- En Cortes terminados: botón "Descargar PDF" por cada corte
+  (comprobante con foto de prenda, quiénes, montos y totales)
 
-Subí estos archivos a la RAÍZ del repo de GitHub.
-Después del deploy abrí en incógnito y buscá el texto: v6 · asignar corte
+Subí los archivos a la raíz del repo.
+Debés ver: v7 · móvil + PDF
