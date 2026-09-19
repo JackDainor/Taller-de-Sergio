@@ -1,21 +1,10 @@
-Taller Oficina — Menú lateral v5
+Taller Oficina v6 — Asignar corte
 ================================
 
-CÓMO SUBIR A GITHUB + VERCEL (importante)
-1. Descomprimí este ZIP.
-2. Los archivos (index.html, app.js, styles.css, etc.) deben quedar
-   en la RAÍZ del repositorio, NO dentro de otra carpeta.
-3. En Vercel, Root Directory = vacío / raíz del repo.
-4. Después del deploy, abrí la web en ventana de INCÓGNITO.
-5. Debés ver arriba a la derecha un botón dorado "Menú"
-   y el texto "v5 · menú lateral" debajo del título.
+Cambios:
+- "Grupos" pasó a "Asignar corte"
+- Cada asignación muestra foto de la prenda, quiénes, a cuánto y resumen del mes
+- En Prendas ves si el corte ya está en producción o sin asignar
 
-Si NO ves "v5 · menú lateral", todavía está la versión vieja en caché.
-Solución: vaciar caché del navegador o incógnito.
-
-Qué incluye el menú lateral
-- Resumen, Funcionarios, Prendas, Grupos, Cortes, Vales, Pagos, Ajustes
-- Mes de trabajo / marcar mes terminado
-- Tema claro/oscuro
-- Se abre con el botón Menú (arriba derecha)
-- Se cierra con X, tocando afuera o Escape
+Subí estos archivos a la RAÍZ del repo de GitHub.
+Después del deploy abrí en incógnito y buscá el texto: v6 · asignar corte

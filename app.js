@@ -253,9 +253,9 @@
     const titles = {
       dashboard: ["Resumen del mes", "Panel"],
       workers: ["Plantel", "Funcionarios"],
-      garments: ["Catálogo de producción", "Prendas"],
-      groups: ["Equipos de costura", "Grupos"],
-      cuts: ["Producción del mes", "Cortes terminados"],
+      garments: ["Catálogo y estado de cortes", "Prendas"],
+      groups: ["Quién hace cada prenda", "Asignar corte"],
+      cuts: ["Registrar producción hecha", "Cortes terminados"],
       vales: ["Adelantos individuales", "Vales"],
       payroll: ["Liquidación", "Pagos"],
       settings: ["Respaldos y preferencias", "Ajustes y datos"]
@@ -345,26 +345,66 @@
     );
   }
 
+  function garmentAssignments(garmentId) {
+    return currentData().groups.filter(function (a) { return a.garmentId === garmentId; });
+  }
+
+  function assignmentProgress(assignmentId) {
+    const cuts = currentData().cuts.filter(function (c) { return c.groupId === assignmentId; });
+    let qty = 0;
+    let pending = 0;
+    let paid = 0;
+    cuts.forEach(function (c) {
+      const n = Number(c.qty || 0);
+      qty += n;
+      if (c.status === "pagado") paid += n;
+      else pending += n;
+    });
+    return { qty: qty, pending: pending, paid: paid, count: cuts.length };
+  }
+
   function renderGarments() {
     const cards = state.garments.length
       ? state.garments.map(function (g) {
+          const assigns = garmentAssignments(g.id);
           const photo = g.photo
             ? '<img class="garment-photo" src="' + g.photo + '" alt="' + escapeHtml(g.name) + '">'
             : '<div class="garment-photo"></div>';
+          var statusHtml = "";
+          if (!assigns.length) {
+            statusHtml = '<div class="status-block"><span class="badge warn">Sin asignar este mes</span>' +
+              '<p class="muted">Todavía nadie está haciendo este corte.</p></div>';
+          } else {
+            statusHtml = '<div class="status-block"><span class="badge ok">En producción</span>';
+            statusHtml += assigns.map(function (a) {
+              const prog = assignmentProgress(a.id);
+              const people = (a.members || []).map(function (m) {
+                const w = workerById(m.workerId);
+                return (w ? w.name : "—") + " · " + m.machine;
+              }).join(", ");
+              return '<div class="mini-summary">' +
+                "<strong>" + escapeHtml(a.name || "Asignación") + "</strong><br>" +
+                '<span class="muted">Quiénes: ' + escapeHtml(people || "—") + "</span><br>" +
+                '<span class="muted">A cuánto: ' + money(a.pricePerPiece) + " / prenda · Recta " + money(a.rectaPay) + " · Overlock " + money(a.overlockPay) + "</span><br>" +
+                '<span class="muted">Hecho este mes: ' + prog.qty + " prendas" +
+                (prog.count ? " (pend. pago " + prog.pending + " · pagadas " + prog.paid + ")" : " (aún sin cortes terminados)") +
+                "</span></div>";
+            }).join("") + "</div>";
+          }
           return '<article class="card gcard">' + photo +
             "<h4>" + escapeHtml(g.name) + "</h4>" +
-            '<span class="badge">' + labelType(g.type) + "</span>" +
+            '<span class="badge">' + labelType(g.type) + "</span> " + statusHtml +
             '<p class="muted">' + escapeHtml(g.notes || "") + "</p>" +
             '<div class="toolbar">' +
             '<button type="button" class="btn small secondary" data-action="edit-garment" data-id="' + g.id + '">Editar</button>' +
             '<button type="button" class="btn small" data-action="del-garment" data-id="' + g.id + '">Quitar</button>' +
             "</div></article>";
         }).join("")
-      : '<div class="card muted">Cargá las prendas que se confeccionan.</div>';
+      : '<div class="card muted">Cargá las prendas del taller (con foto). Después asigná quién hace cada corte.</div>';
 
     document.getElementById("view-garments").innerHTML =
       '<div class="toolbar">' +
-      '<p class="muted">Tejido plano, malla u otro.</p>' +
+      '<p class="muted">Acá ves cada prenda y si ese corte ya está asignado o todavía no.</p>' +
       '<button type="button" class="btn" data-action="add-garment">Agregar prenda</button>' +
       '</div><div class="cards">' + cards + "</div>";
   }
@@ -390,25 +430,40 @@
     const cards = data.groups.length
       ? data.groups.map(function (g) {
           const garment = garmentById(g.garmentId);
-          const members = (g.members || []).map(function (m) {
+          const prog = assignmentProgress(g.id);
+          const per = splitForGroup(g);
+          const peopleLines = (g.members || []).map(function (m) {
             const w = workerById(m.workerId);
-            return (w ? w.name : "—") + " (" + m.machine + ")";
-          }).join(" · ");
-          return '<article class="card"><h4>' + escapeHtml(g.name) + "</h4>" +
-            "<p>" + escapeHtml(garment ? garment.name : "Sin prenda") + " · " + money(g.pricePerPiece) + " / prenda</p>" +
-            '<p class="muted">Recta ' + money(g.rectaPay) + " · Overlock " + money(g.overlockPay) + "</p>" +
-            "<p>" + escapeHtml(members || "Sin integrantes") + "</p>" +
+            const share = per[m.workerId] != null ? per[m.workerId] : 0;
+            return "<li><strong>" + escapeHtml(w ? w.name : "—") + "</strong> · " +
+              escapeHtml(m.machine) + " · " + money(share) + " / prenda</li>";
+          }).join("");
+          const photo = garment && garment.photo
+            ? '<img class="garment-photo" src="' + garment.photo + '" alt="' + escapeHtml(garment.name || "") + '">'
+            : '<div class="garment-photo"></div>';
+          return '<article class="card assign-card">' + photo +
+            '<div class="assign-body">' +
+            "<h4>" + escapeHtml(g.name || "Asignación") + "</h4>" +
+            '<p class="assign-prenda"><strong>Prenda:</strong> ' + escapeHtml(garment ? garment.name : "Sin prenda") +
+            (garment ? " · " + labelType(garment.type) : "") + "</p>" +
+            '<p><strong>A cuánto se paga:</strong> ' + money(g.pricePerPiece) + " / prenda</p>" +
+            '<p class="muted">Recta ' + money(g.rectaPay) + " · Overlock " + money(g.overlockPay) + " (si hay 2 en la misma máquina, se divide)</p>" +
+            "<p><strong>Quiénes lo hacen:</strong></p>" +
+            '<ul class="people-list">' + (peopleLines || "<li class=\"muted\">Sin personas</li>") + "</ul>" +
+            '<p class="muted">Resumen del mes: ' + prog.qty + " prendas registradas" +
+            (prog.count ? " · pendiente pago " + prog.pending + " · pagadas " + prog.paid : " · todavía no hay cortes terminados") +
+            "</p>" +
             '<div class="toolbar">' +
-            '<button type="button" class="btn small secondary" data-action="edit-group" data-id="' + g.id + '"' + (closed ? " disabled" : "") + ">Editar</button>" +
+            '<button type="button" class="btn small secondary" data-action="edit-group" data-id="' + g.id + '"' + (closed ? " disabled" : "") + ">Editar asignación</button>" +
             '<button type="button" class="btn small" data-action="del-group" data-id="' + g.id + '"' + (closed ? " disabled" : "") + ">Quitar</button>" +
-            "</div></article>";
+            "</div></div></article>";
         }).join("")
-      : '<div class="card muted">Creá un grupo de 1, 2 o 3 personas y definí el pago por máquina.</div>';
+      : '<div class="card muted">Asigná un corte: prenda, quiénes, a cuánto se paga y en qué máquina.</div>';
 
     document.getElementById("view-groups").innerHTML =
       '<div class="toolbar">' +
-      '<p class="muted">Valores de recta y overlock editables por grupo' + (closed ? ". Mes cerrado: solo lectura." : ".") + "</p>" +
-      '<button type="button" class="btn" data-action="add-group"' + (closed ? " disabled" : "") + ">Crear grupo</button>" +
+      '<p class="muted">Cada tarjeta resume el corte asignado: foto, prenda, personas y precios' + (closed ? ". Mes cerrado: solo lectura." : ".") + "</p>" +
+      '<button type="button" class="btn" data-action="add-group"' + (closed ? " disabled" : "") + ">Asignar corte</button>" +
       '</div><div class="cards">' + cards + "</div>";
   }
 
@@ -430,26 +485,27 @@
 
     const rows = members.map(function (m, i) {
       return '<div class="form-row member-row">' +
-        "<label>Funcionario " + (i + 1) +
+        "<label>Quién hace " + (i + 1) +
         '<select name="worker_' + i + '"><option value="">—</option>' + workerOpts(m.workerId) + "</select></label>" +
-        "<label>Máquina<select name=\"machine_" + i + '">' +
+        '<label>Máquina<select name="machine_' + i + '">' +
         '<option value="recta"' + (m.machine === "recta" ? " selected" : "") + ">Recta</option>" +
         '<option value="overlock"' + (m.machine === "overlock" ? " selected" : "") + ">Overlock</option>" +
         "</select></label></div>";
     }).join("");
 
     return (
-      '<label>Nombre del grupo<input name="name" value="' + escapeHtml(group.name || "") + '" required></label>' +
-      '<label>Prenda<select name="garmentId"><option value="">—</option>' + garmentOpts + "</select></label>" +
+      '<label>Nombre (ej: Corte remera — María y Juan)<input name="name" value="' + escapeHtml(group.name || "") + '" required></label>' +
+      '<label>Qué prenda van a hacer<select name="garmentId"><option value="">Elegí la prenda</option>' + garmentOpts + "</select></label>" +
       '<div class="form-row">' +
-      '<label>Precio por prenda (corte)<input type="number" step="0.01" name="pricePerPiece" value="' + (group.pricePerPiece != null ? group.pricePerPiece : 1.4) + '"></label>' +
-      '<label>Pago recta / prenda<input type="number" step="0.01" name="rectaPay" value="' + (group.rectaPay != null ? group.rectaPay : 1) + '"></label>' +
+      '<label>A cuánto se paga el corte (por prenda)<input type="number" step="0.01" name="pricePerPiece" value="' + (group.pricePerPiece != null ? group.pricePerPiece : 1.4) + '"></label>' +
+      '<label>Parte recta / prenda<input type="number" step="0.01" name="rectaPay" value="' + (group.rectaPay != null ? group.rectaPay : 1) + '"></label>' +
       "</div>" +
-      '<label>Pago overlock / prenda<input type="number" step="0.01" name="overlockPay" value="' + (group.overlockPay != null ? group.overlockPay : 0.4) + '"></label>' +
-      '<p class="muted">Ejemplo: corte R$ 1,40 · recta R$ 1,00 (2 rectas → R$ 0,50 c/u) · overlock R$ 0,40.</p>' +
+      '<label>Parte overlock / prenda<input type="number" step="0.01" name="overlockPay" value="' + (group.overlockPay != null ? group.overlockPay : 0.4) + '"></label>' +
+      '<p class="muted">Ejemplo: corte R$ 1,40 · recta R$ 1,00 (2 en recta → R$ 0,50 c/u) · overlock R$ 0,40.</p>' +
+      "<p><strong>Quiénes van a hacerlo</strong></p>" +
       '<div id="memberFields">' + rows + "</div>" +
-      '<button type="button" class="btn secondary" data-action="add-member-row">Agregar integrante</button>' +
-      '<button type="button" class="btn" data-action="save-group" data-id="' + escapeHtml(group.id || "") + '">Guardar grupo</button>'
+      '<button type="button" class="btn secondary" data-action="add-member-row">Agregar otra persona</button>' +
+      '<button type="button" class="btn" data-action="save-group" data-id="' + escapeHtml(group.id || "") + '">Guardar asignación</button>'
     );
   }
 
@@ -471,9 +527,9 @@
 
     document.getElementById("view-cuts").innerHTML =
       '<div class="toolbar">' +
-      '<p class="muted">Cada corte pertenece al mes activo' + (closed ? ". Mes cerrado." : ".") + "</p>" +
-      '<button type="button" class="btn" data-action="add-cut"' + (closed ? " disabled" : "") + ">Registrar corte terminado</button>" +
-      '</div><div class="card"><table><thead><tr><th>Fecha</th><th>Grupo</th><th>Prendas</th><th>Estado</th><th>Notas</th><th></th></tr></thead><tbody>' +
+      '<p class="muted">Registrá cuántas prendas terminó cada asignación' + (closed ? ". Mes cerrado." : ".") + "</p>" +
+      '<button type="button" class="btn" data-action="add-cut"' + (closed ? " disabled" : "") + ">Registrar prendas terminadas</button>" +
+      '</div><div class="card"><table><thead><tr><th>Fecha</th><th>Asignación</th><th>Prendas</th><th>Estado</th><th>Notas</th><th></th></tr></thead><tbody>' +
       rows + "</tbody></table></div>";
   }
 
@@ -483,7 +539,7 @@
     }).join("");
     const today = new Date().toISOString().slice(0, 10);
     return (
-      '<label>Grupo<select name="groupId">' + opts + "</select></label>" +
+      '<label>Asignación de corte<select name="groupId">' + opts + "</select></label>" +
       '<div class="form-row">' +
       '<label>Fecha<input type="date" name="date" value="' + today + '"></label>' +
       '<label>Prendas totales<input type="number" name="qty" min="1" value="1"></label>' +
@@ -719,12 +775,12 @@
     }
     if (action === "add-group") {
       if (guardClosed()) return;
-      openModal("Nuevo grupo", groupForm());
+      openModal("Asignar corte", groupForm());
       return;
     }
     if (action === "add-cut") {
       if (guardClosed()) return;
-      if (!currentData().groups.length) return toast("Primero creá un grupo");
+      if (!currentData().groups.length) return toast("Primero asigná un corte");
       openModal("Corte terminado", cutForm());
       return;
     }
@@ -770,12 +826,12 @@
     }
     if (action === "edit-group") {
       if (guardClosed()) return;
-      openModal("Editar grupo", groupForm(groupById(id)));
+      openModal("Editar asignación de corte", groupForm(groupById(id)));
       return;
     }
     if (action === "del-group") {
       if (guardClosed()) return;
-      if (!confirm("¿Quitar este grupo?")) return;
+      if (!confirm("¿Quitar esta asignación de corte?")) return;
       currentData().groups = currentData().groups.filter(function (g) { return g.id !== id; });
       save();
       render();
@@ -876,7 +932,8 @@
       if (!root) return;
       const newId = id || uid("gr");
       const name = val(root, "name").trim();
-      if (!name) return toast("Poné un nombre de grupo");
+      if (!name) return toast("Poné un nombre a la asignación");
+      if (!val(root, "garmentId")) return toast("Elegí qué prenda van a hacer");
       const item = {
         id: newId,
         name: name,
@@ -886,7 +943,7 @@
         overlockPay: Number(val(root, "overlockPay") || 0),
         members: collectGroupMembers(root)
       };
-      if (!item.members.length) return toast("Elegí al menos un funcionario");
+      if (!item.members.length) return toast("Elegí al menos quién lo va a hacer");
       const arr = currentData().groups;
       const idx = arr.findIndex(function (g) { return g.id === newId; });
       if (idx >= 0) arr[idx] = item;
@@ -894,7 +951,7 @@
       save();
       closeModal();
       render();
-      toast("Grupo guardado");
+      toast("Asignación de corte guardada");
       return;
     }
     if (action === "save-cut") {
