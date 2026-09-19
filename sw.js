@@ -1,4 +1,4 @@
-const CACHE = "atelier-office-v7-mobile-pdf";
+const CACHE = "atelier-office-v8-estado-foto";
 self.addEventListener("install", (e) => { self.skipWaiting(); });
 self.addEventListener("activate", (e) => {
   e.waitUntil(caches.keys().then((keys) => Promise.all(keys.map((k) => caches.delete(k)))).then(() => self.clients.claim()));

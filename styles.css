@@ -506,3 +506,32 @@ body { font-size: 14px; line-height: 1.35; }
   .topbar h2 { font-size: 15px !important; max-width: 46vw; }
   .menu-btn { padding: 9px 11px; }
 }
+
+
+/* Estados y visor de foto */
+.badge.done {
+  background: color-mix(in srgb, #3d7ea6 20%, transparent);
+  color: #2a6a91;
+}
+[data-theme="dark"] .badge.done {
+  background: color-mix(in srgb, #7eb8d8 22%, transparent);
+  color: #b7daf0;
+}
+.clickable-photo {
+  cursor: zoom-in;
+}
+.clickable-photo:active { opacity: 0.92; }
+.photo-viewer {
+  display: grid;
+  place-items: center;
+  width: 100%;
+}
+.photo-viewer img {
+  max-width: 100%;
+  max-height: min(75vh, 720px);
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  border-radius: 12px;
+  background: var(--bg-soft);
+}

@@ -368,26 +368,43 @@
       ? state.garments.map(function (g) {
           const assigns = garmentAssignments(g.id);
           const photo = g.photo
-            ? '<img class="garment-photo" src="' + g.photo + '" alt="' + escapeHtml(g.name) + '">'
+            ? '<img class="garment-photo clickable-photo" src="' + g.photo + '" alt="' + escapeHtml(g.name) + '" data-action="view-photo" data-src="' + g.photo + '" data-title="' + escapeHtml(g.name) + '" role="button" tabindex="0">'
             : '<div class="garment-photo"></div>';
           var statusHtml = "";
           if (!assigns.length) {
             statusHtml = '<div class="status-block"><span class="badge warn">Sin asignar este mes</span>' +
               '<p class="muted">Todavía nadie está haciendo este corte.</p></div>';
           } else {
-            statusHtml = '<div class="status-block"><span class="badge ok">En producción</span>';
+            var allDone = true;
+            var anyDone = false;
+            assigns.forEach(function (a) {
+              const prog = assignmentProgress(a.id);
+              if (prog.count > 0) anyDone = true;
+              else allDone = false;
+            });
+            var mainBadge = allDone
+              ? '<span class="badge done">Corte acabado</span>'
+              : (anyDone
+                  ? '<span class="badge ok">En producción · parte acabada</span>'
+                  : '<span class="badge ok">En producción</span>');
+            statusHtml = '<div class="status-block">' + mainBadge;
             statusHtml += assigns.map(function (a) {
               const prog = assignmentProgress(a.id);
+              const finished = prog.count > 0;
               const people = (a.members || []).map(function (m) {
                 const w = workerById(m.workerId);
                 return (w ? w.name : "—") + " · " + m.machine;
               }).join(", ");
+              const stateBadge = finished
+                ? '<span class="badge done">Corte acabado</span>'
+                : '<span class="badge ok">En producción</span>';
               return '<div class="mini-summary">' +
-                "<strong>" + escapeHtml(a.name || "Asignación") + "</strong><br>" +
+                "<strong>" + escapeHtml(a.name || "Asignación") + "</strong> " + stateBadge + "<br>" +
                 '<span class="muted">Quiénes: ' + escapeHtml(people || "—") + "</span><br>" +
                 '<span class="muted">A cuánto: ' + money(a.pricePerPiece) + " / prenda · Recta " + money(a.rectaPay) + " · Overlock " + money(a.overlockPay) + "</span><br>" +
-                '<span class="muted">Hecho este mes: ' + prog.qty + " prendas" +
-                (prog.count ? " (pend. pago " + prog.pending + " · pagadas " + prog.paid + ")" : " (aún sin cortes terminados)") +
+                '<span class="muted">' + (finished
+                  ? ("Terminado: " + prog.qty + " prendas (pend. pago " + prog.pending + " · pagadas " + prog.paid + ")")
+                  : "Aún sin registrar como corte terminado") +
                 "</span></div>";
             }).join("") + "</div>";
           }
@@ -404,7 +421,7 @@
 
     document.getElementById("view-garments").innerHTML =
       '<div class="toolbar">' +
-      '<p class="muted">Acá ves cada prenda y si ese corte ya está asignado o todavía no.</p>' +
+      '<p class="muted">Estado del mes: sin asignar, en producción o corte acabado. Tocá la foto para verla completa.</p>' +
       '<button type="button" class="btn" data-action="add-garment">Agregar prenda</button>' +
       '</div><div class="cards">' + cards + "</div>";
   }
@@ -439,7 +456,7 @@
               escapeHtml(m.machine) + " · " + money(share) + " / prenda</li>";
           }).join("");
           const photo = garment && garment.photo
-            ? '<img class="garment-photo" src="' + garment.photo + '" alt="' + escapeHtml(garment.name || "") + '">'
+            ? '<img class="garment-photo clickable-photo" src="' + garment.photo + '" alt="' + escapeHtml(garment.name || "") + '" data-action="view-photo" data-src="' + garment.photo + '" data-title="' + escapeHtml(garment.name || "Prenda") + '" role="button" tabindex="0">'
             : '<div class="garment-photo"></div>';
           return '<article class="card assign-card">' + photo +
             '<div class="assign-body">' +
@@ -602,7 +619,7 @@
             return escapeHtml(w ? w.name : "—") + " (" + escapeHtml(m.machine) + ") " + money(unit * qty);
           }).join(" · ");
           const photo = garment && garment.photo
-            ? '<img class="cut-thumb" src="' + garment.photo + '" alt="">'
+            ? '<img class="cut-thumb clickable-photo" src="' + garment.photo + '" alt="" data-action="view-photo" data-src="' + garment.photo + '" data-title="' + escapeHtml(garment.name || "Prenda") + '" role="button" tabindex="0">'
             : '<div class="cut-thumb empty"></div>';
           return '<article class="card cut-card">' +
             '<div class="cut-top">' + photo +
@@ -863,6 +880,13 @@
   async function onAction(action, el, e) {
     const id = el.getAttribute("data-id") || "";
 
+    if (action === "view-photo") {
+      const src = el.getAttribute("data-src") || "";
+      const title = el.getAttribute("data-title") || "Foto de la prenda";
+      if (!src) return toast("Esta prenda no tiene foto");
+      openModal(title, '<div class="photo-viewer"><img src="' + src + '" alt="' + escapeHtml(title) + '"></div>');
+      return;
+    }
     if (action === "add-worker") {
       openModal("Nuevo funcionario", workerForm());
       return;
